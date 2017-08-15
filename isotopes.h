@@ -26,7 +26,7 @@ typedef struct {
 
 int Mass_Diff(const void *fm1, const void *fm2);
 
-#define NM 8 /* Number of mass types */
+#define NM 11 /* Number of mass types */
 
 typedef enum { 
   MASS_M,
@@ -37,6 +37,9 @@ typedef enum {
   MASS_POS,
   MASS_NEG,
   MASS_POS_K,
+  MASS_POS_2H,
+  MASS_POS_HNa,
+  MASS_POS_2Na,
 } mass_t;
 
 typedef struct {
@@ -45,6 +48,7 @@ typedef struct {
   int elem2, count2;
   int elem3, count3;
   double madd;
+  int    charge;
 } mass_type_t;
 
 extern mass_type_t Mass[NM];
@@ -52,6 +56,8 @@ extern mass_type_t Mass[NM];
 static int Mass_Init_Flag=0;
 
 double Calc_Mass(formula_t fi, mass_t M);
+int    Calc_Charge(formula_t fi, mass_t M);
+double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M);
 double Calc_Mass_M(formula_t fi);
 void   mass_type_init();
 

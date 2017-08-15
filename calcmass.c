@@ -54,6 +54,9 @@ int main(int argc, char** argv)
   else if(strcmp(argv[2],"MK+")==0) MT=MASS_POS_K;
   else if(strcmp(argv[2],"MCa+")==0)MT=MASS_POS_Ca;
   else if(strcmp(argv[2],"MH-")==0) MT=MASS_NEG_H;
+  else if(strcmp(argv[2],"M2H++")==0) MT=MASS_POS_2H;
+  else if(strcmp(argv[2],"MHNa++")==0) MT=MASS_POS_HNa;
+  else if(strcmp(argv[2],"M2Na++")==0) MT=MASS_POS_2Na;
   else{
     printf("Unknown mass type: \'%s\'. Exiting.\n",argv[2]);
     return(-1);
@@ -73,9 +76,9 @@ int main(int argc, char** argv)
       printf("Please enter the target mass\n");
       return(-1);
     }else{
-      float fm, *pfm=&fm;
+      double fm, *pfm=&fm;
       /*printf("argv[4] is \'%s\'\n",argv[4]);*/
-      i=sscanf(argv[4],"%f", pfm);
+      i=sscanf(argv[4],"%lf", pfm);
       Target_Mass=fm;
       printf("Target mass is %10.6f\n",Target_Mass);
     }
@@ -86,7 +89,7 @@ int main(int argc, char** argv)
 	Loop_End (pfi,plim);
 	Loop_Next(pfi,plim)){
       Loop_Copy(&(chem->f),pfi);
-      chem->mass=Calc_Mass(chem->f,MT);
+      chem->mass=Calc_Mass_Charge_Ratio(chem->f,MT);
       chem->mass_diff=chem->mass-Target_Mass;
       i++;chem++;count++;
       if(i>=N_Chem){
@@ -119,7 +122,7 @@ int main(int argc, char** argv)
   }else{
     printf("Unknown argument: %s", argv[1]);
     return(-1);
-  }
+  };
 
 };
 
@@ -128,6 +131,7 @@ double Print_Formula_Mass(formula_t fi, mass_t mt)
   int m,e;
   printf("\nFormula:\n");
   double mass=0.0, me;
+  double charge=0.0;
   for(e=0;e<NI;e++){
     me= Isotopes[e].dmass*fi[e];
     mass+=me;
@@ -137,7 +141,8 @@ double Print_Formula_Mass(formula_t fi, mass_t mt)
   }
   printf("------------------------------\n");
 /*  for(m=0;m<NM;m++){*/
-  printf("    %10s: %11.6f\n",Mass[mt].name,Calc_Mass(fi,mt));
+  printf("    %10s: (M)   %11.6f\n",Mass[mt].name,Calc_Mass(fi,mt));
+  printf("    %10s: (M/Z) %11.6f\n",Mass[mt].name,Calc_Mass_Charge_Ratio(fi,mt));
 /*  }*/
   return(mass);
 };
