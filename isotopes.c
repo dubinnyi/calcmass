@@ -25,7 +25,7 @@ isotope_t Isotopes[NI] =
 
 mass_type_t Mass[NM]={
 /* name, elem1,count1,elem2,count2,elem3,count3,madd,charge */
- {"[M] ",    0,     0,    0,     0,    0,     0, 0.0, +0},  /* MASS_M:      No changes      */
+ {"[M] ",    0,     0,    0,     0,    0,     0, 0.0, +1},  /* MASS_M:      No changes, but set 1   */
  {"[M+H]+",  1,     1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_H:    1H(+1), e(-1) */
  {"[M+Na]+", 7,     1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_Na: 23Na(+1), e(-1) */
  {"[M+Ca-H]+",8,    1,    0,    -1,    1,    -1, 0.0, +1},  /* MASS_POS_Ca: 40Ca(+1), e(-1) H(-1)*/
@@ -70,7 +70,7 @@ double Calc_Mass(formula_t fi, mass_t M)
   return(mass);
 };
 
-int Calc_Charge(formula_t fi, mass_t M)
+double Calc_Charge(formula_t fi, mass_t M)
 {
   int e;
   double me;
@@ -85,11 +85,14 @@ int Calc_Charge(formula_t fi, mass_t M)
 double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M)
 {
   double mass;
-  int    charge;
+  double charge;
 
   mass =   Calc_Mass(fi,M);
   charge = Calc_Charge(fi, M);
-  return(mass/charge);
+/*  if( charge == 0 || charge == 0.0)
+    return(mass/charge);
+  else */
+    return(mass);
 }
 
 int Mass_Diff(const void *fm1, const void *fm2)

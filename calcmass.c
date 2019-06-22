@@ -16,7 +16,7 @@ void Print_Limits(limits_t lim, char* str);
 
 #define N_Best 30
 #define MAX_DIFF 0.1
-#define MAX_DIFF_PPM 5.0
+#define MAX_DIFF_PPM 20.0
 #define N_Chem 512
 fmass_t CHEM_LIST[N_Chem];
 fmass_t *chem = CHEM_LIST;
@@ -29,6 +29,8 @@ int main(int argc, char** argv)
   double mass, Target_Mass, *TM=&Target_Mass;
   char fs[1024];
   mass_t MT;
+
+  mass_type_init();
 
   printf("\ncalcmass by Maxim A. Dubinnyi\n", NI);
   printf("\nDatabase of %d known isotopes loaded:\n", NI);
@@ -62,7 +64,10 @@ int main(int argc, char** argv)
     printf("Unknown mass type: \'%s\'. Exiting.\n",argv[2]);
     return(-1);
   }
-  
+ 
+  printf("Mass type is \'%s\' (%d), charge= %2.1f, madd=%9.6f \n", 
+      Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
+
   if(strcmp(argv[1],"-mass")==0){
     Parse_Formula(argv[3],fi);
     Print_Formula(fi,fs);
@@ -90,9 +95,9 @@ int main(int argc, char** argv)
 	Loop_End (pfi,plim);
 	Loop_Next(pfi,plim)){
       Loop_Copy(&(chem->f),pfi);
-      chem->mass=Calc_Mass_Charge_Ratio(chem->f,MT);
-      chem->mass_diff=chem->mass-Target_Mass;
-      chem->mass_diff_ppm=(chem->mass_diff)/Target_Mass*1000000.;
+      chem->mass          = Calc_Mass_Charge_Ratio(chem->f,MT);
+      chem->mass_diff     = chem->mass - Target_Mass;
+      chem->mass_diff_ppm = (chem->mass_diff)/Target_Mass*1000000.;
       i++;chem++;count++;
       if(i>=N_Chem){
 	qsort(CHEM_LIST,N_Chem,sizeof(fmass_t),Mass_Diff);
@@ -111,11 +116,14 @@ int main(int argc, char** argv)
     int n_act=n_chem<N_Best?n_chem:N_Best;
     
     int n_print;
-    for(n_print=0;n_print<n_act;n_print++){
-      if(fabs(CHEM_LIST[n_print].mass_diff)>=MAX_DIFF)break;
-      if(fabs(CHEM_LIST[n_print].mass_diff_ppm)>=MAX_DIFF_PPM)break;
-    }
-    
+    for(n_print=0;
+	n_print<n_act && 
+        fabs(CHEM_LIST[n_print].mass_diff)<=MAX_DIFF &&
+        fabs(CHEM_LIST[n_print].mass_diff_ppm)<=MAX_DIFF_PPM ;
+	n_print++){};
+   
+    if(n_print==0)n_print=1;
+
     printf("Best %d formulas with mass differense less then %8.6f Da and %7.3f ppm:\n",
 	n_print, MAX_DIFF, MAX_DIFF_PPM);
     for(i=0;i<n_print;i++){

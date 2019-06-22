@@ -57,7 +57,7 @@ extern mass_type_t Mass[NM];
 static int Mass_Init_Flag=0;
 
 double Calc_Mass(formula_t fi, mass_t M);
-int    Calc_Charge(formula_t fi, mass_t M);
+double Calc_Charge(formula_t fi, mass_t M);
 double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M);
 double Calc_Mass_M(formula_t fi);
 void   mass_type_init();
