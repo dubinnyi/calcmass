@@ -9,6 +9,8 @@ typedef struct
   char   name[3];
   int    imass;
   double dmass;
+  int    valence;
+  int    v_unambig;
 } isotope_t;
 
 extern isotope_t Isotopes[NI];
@@ -23,6 +25,9 @@ typedef struct {
   double mass;
   double mass_diff;
   double mass_diff_ppm;
+  double RDB;  /* Ring and Double Bond counter */
+               /* Neutral formula should have integer and non-nagative RDB value */
+               /* half-integer and nagative RDB means broken valance rules */
 } fmass_t;
 
 int Mass_Diff(const void *fm1, const void *fm2);
@@ -57,6 +62,7 @@ extern mass_type_t Mass[NM];
 static int Mass_Init_Flag=0;
 
 double Calc_Mass(formula_t fi, mass_t M);
+int Calc_RDB(formula_t fi, double *rbd);
 double Calc_Charge(formula_t fi, mass_t M);
 double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M);
 double Calc_Mass_M(formula_t fi);

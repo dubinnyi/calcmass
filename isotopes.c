@@ -4,38 +4,41 @@
 
 static int Mass_Init_Flag;
 
+#define False 0
+#define True  1
+
 isotope_t Isotopes[NI] =
 {
-  { "e",  0,  0.000549 },  /*  0  ELECTRON    */
-  { "H",  1,  1.007825 },  /*  1  PROTON      */
-  { "C", 12, 12.000000 },  /*  2  CARBON      */
-  { "N", 14, 14.003074 },  /*  3  NITROGEN    */
-  { "O", 16, 15.994915 },  /*  4  OXIGEN      */
-  { "P", 31, 30.973763 },  /*  5  PHOSPHORUS  */
-  { "S", 32, 31.972072 },  /*  6  SERUM       */ 
-  {"Na", 23, 22.989770 },  /*  7  SODIUM      */ 
-  {"Ca", 40, 39.962591 },  /*  8  CALCIUM     */ 
-  { "K", 39, 38.963708 },  /*  9  POTASSIUM   */ 
+  { "e",  0,  0.000549, 0, False },  /*  0  ELECTRON    */
+  { "C", 12, 12.000000, 4, True  },  /*  1  CARBON      */
+  { "H",  1,  1.007825, 1, True  },  /*  2  PROTON      */
+  { "N", 14, 14.003074, 3, True  },  /*  3  NITROGEN    */
+  { "O", 16, 15.994915, 2, True  },  /*  4  OXIGEN      */
+  { "P", 31, 30.973763, 5, False },  /*  5  PHOSPHORUS  */
+  { "S", 32, 31.972072, 2, False },  /*  6  SERUM       */ 
+  {"Na", 23, 22.989770, 1, True  },  /*  7  SODIUM      */ 
+  {"Ca", 40, 39.962591, 2, True  },  /*  8  CALCIUM     */ 
+  { "K", 39, 38.963708, 1, True },  /*  9  POTASSIUM   */ 
   
-  { "B", 11, 11.009305 },  /* 10  BORON       */ 
-  { "F", 19, 18.998403 },  /* 11  FLUORINE    */ 
-  {"Cl", 35, 34.968853 },  /* 12  CHLORINE    */ 
-  {"Br", 79, 78.918336 },  /* 13  BROMINE     */ 
+  { "B", 11, 11.009305, 3, True },  /* 10  BORON       */ 
+  { "F", 19, 18.998403, 1, True },  /* 11  FLUORINE    */ 
+  {"Cl", 35, 34.968853, 1, True },  /* 12  CHLORINE    */ 
+  {"Br", 79, 78.918336, 1, True },  /* 13  BROMINE     */ 
 };
 
 mass_type_t Mass[NM]={
 /* name, elem1,count1,elem2,count2,elem3,count3,madd,charge */
- {"[M] ",    0,     0,    0,     0,    0,     0, 0.0, +1},  /* MASS_M:      No changes, but set 1   */
- {"[M+H]+",  1,     1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_H:    1H(+1), e(-1) */
- {"[M+Na]+", 7,     1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_Na: 23Na(+1), e(-1) */
- {"[M+Ca-H]+",8,    1,    0,    -1,    1,    -1, 0.0, +1},  /* MASS_POS_Ca: 40Ca(+1), e(-1) H(-1)*/
- {"[M-H]-",  1,    -1,    0,    +1,    0,     0, 0.0, -1},  /* MASS_NEG_H:    1H(-1), e(+1) */
- {"[M]+",    0,    -1,    0,     0,    0,     0, 0.0, +1},  /* MASS_POS:      e(-1) */
- {"[M]-",    0,    +1,    0,     0,    0,     0, 0.0, -1},  /* MASS_NEG:      e(+1) */
- {"[M+K]+",  9,     1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_K:  39K(+1),  e(-1) */
- {"[M+2H]++",1,     2,    0,    -2,    0,     0, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
- {"[M+H+Na]++",1,   1,    0,    -2,    7,     1, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
- {"[M+2Na]++",7,    2,    0,    -2,    0,     0, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+ {"[M] ",      0,   0,    0,     0,    0,     0, 0.0, +1},  /* MASS_M:      No changes, but set 1   */
+ {"[M+H]+",    2,   1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_H:    1H(+1), e(-1) */
+ {"[M+Na]+",   7,   1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_Na: 23Na(+1), e(-1) */
+ {"[M+Ca-H]+", 8,   1,    0,    -1,    2,    -1, 0.0, +1},  /* MASS_POS_Ca: 40Ca(+1), e(-1) H(-1)*/
+ {"[M-H]-",    2,  -1,    0,    +1,    0,     0, 0.0, -1},  /* MASS_NEG_H:    1H(-1), e(+1) */
+ {"[M]+",      0,  -1,    0,     0,    0,     0, 0.0, +1},  /* MASS_POS:      e(-1) */
+ {"[M]-",      0,  +1,    0,     0,    0,     0, 0.0, -1},  /* MASS_NEG:      e(+1) */
+ {"[M+K]+",    9,   1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_K:  39K(+1),  e(-1) */
+ {"[M+2H]++",  2,   2,    0,    -2,    0,     0, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+ {"[M+H+Na]++",2,   1,    0,    -2,    7,     1, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+ {"[M+2Na]++", 7,   2,    0,    -2,    0,     0, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
 };
 
 void mass_type_init()
@@ -69,6 +72,26 @@ double Calc_Mass(formula_t fi, mass_t M)
   mass+=Mass[M].madd;
   return(mass);
 };
+
+int Calc_RDB(formula_t fi, double *rbd)
+  /* input:  formula_t  fi   */
+  /* output: double    *rbd  */
+  /* return  1 if unambiguous, 0 if ambiguous (solfur, phosphorus are in
+   * the formula */
+{
+  *rbd = 1.0;
+  int unambig_flag = True;
+  int e;
+  
+  if(!Mass_Init_Flag)mass_type_init();
+  for(e=0;e<NI;e++){
+    /* Formula for RDB */
+    (*rbd) += (Isotopes[e].valence-2.0)/2.0*fi[e];
+    if(fi[e])
+      unambig_flag &= (Isotopes[e].v_unambig) ;
+  }
+  return unambig_flag;
+}
 
 double Calc_Charge(formula_t fi, mass_t M)
 {

@@ -29,10 +29,12 @@ int main(int argc, char** argv)
   double mass, Target_Mass, *TM=&Target_Mass;
   char fs[1024];
   mass_t MT;
+  int rdb_flag = 0;
 
   mass_type_init();
 
   printf("\ncalcmass by Maxim A. Dubinnyi\n", NI);
+  printf("Version 2021-09-11\n");
   printf("\nDatabase of %d known isotopes loaded:\n", NI);
   for(i=0;i<NI;i++)
     printf("%s(%d)%s",Isotopes[i].name, Isotopes[i].imass, i==NI-1?"\n":", ");
@@ -68,13 +70,21 @@ int main(int argc, char** argv)
   printf("Mass type is \'%s\' (%d), charge= %2.1f, madd=%9.6f \n", 
       Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
 
-  if(strcmp(argv[1],"-mass")==0){
+  if(strcmp(argv[1],"-mass")==0 || strcmp(argv[1],"--mass")==0){
     Parse_Formula(argv[3],fi);
     Print_Formula(fi,fs);
     printf("\nParsed formula: \'%s\'\n",fs);
     mass=Print_Formula_Mass(fi,MT);
     return(0);
-  }else if(strcmp(argv[1],"-chem")==0){
+  }else if(strcmp(argv[1],"-chem")==0 || strcmp(argv[1],"--chem")==0 ||
+           strcmp(argv[1],"-chem-rdb")==0 || strcmp(argv[1],"--chem-rdb")==0
+      ){
+    if(strcmp(argv[1],"-chem-rdb")==0 || strcmp(argv[1],"--chem-rdb")==0 ){
+      /* skip negative and half-integer RDB values */
+      rdb_flag = 1;
+    }else{
+      rdb_flag = 0;
+    }
     Parse_Limits(argv[3],lim);
     Print_Limits(lim,fs);
     printf("\nParsed limits: \'%s\'\n",fs);
@@ -88,21 +98,29 @@ int main(int argc, char** argv)
       Target_Mass=fm;
       printf("Target mass is %10.6f\n",Target_Mass);
     }
+    printf("RDB check flag is %d\n",rdb_flag);
     int i=0,count=0;
     chem = CHEM_LIST;
+    int v_unambig;
+    double rdb;
     for(
-	Loop_Init(pfi,plim); 
-	Loop_End (pfi,plim);
-	Loop_Next(pfi,plim)){
+        Loop_Init(pfi,plim); 
+        Loop_End (pfi,plim);
+        Loop_Next(pfi,plim)){
       Loop_Copy(&(chem->f),pfi);
       chem->mass          = Calc_Mass_Charge_Ratio(chem->f,MT);
       chem->mass_diff     = chem->mass - Target_Mass;
       chem->mass_diff_ppm = (chem->mass_diff)/Target_Mass*1000000.;
-      i++;chem++;count++;
+      v_unambig = Calc_RDB(chem->f, &(chem->RDB));
+      rdb = chem->RDB;
+      if( (!rdb_flag) || 
+	  (rdb_flag && (rdb>=-0.01) && fabs(roundf(rdb)-rdb)<=0.01 ) ){
+         i++;chem++;count++;
+      }
       if(i>=N_Chem){
-	qsort(CHEM_LIST,N_Chem,sizeof(fmass_t),Mass_Diff);
-	i=N_Best;
-	chem=CHEM_LIST+i;
+        qsort(CHEM_LIST,N_Chem,sizeof(fmass_t),Mass_Diff);
+        i=N_Best;
+        chem=CHEM_LIST+i;
       }
       /*
       Print_Formula(*pfi,fs);
@@ -117,19 +135,28 @@ int main(int argc, char** argv)
     
     int n_print;
     for(n_print=0;
-	n_print<n_act && 
+        n_print<n_act && 
         fabs(CHEM_LIST[n_print].mass_diff)<=MAX_DIFF &&
         fabs(CHEM_LIST[n_print].mass_diff_ppm)<=MAX_DIFF_PPM ;
-	n_print++){};
+        n_print++){};
    
     if(n_print==0)n_print=1;
 
-    printf("Best %d formulas with mass differense less then %8.6f Da and %7.3f ppm:\n",
-	n_print, MAX_DIFF, MAX_DIFF_PPM);
+    printf("Best %d formulas with mass differense less then %8.6f Da and %7.3f ppm",
+        n_print, MAX_DIFF, MAX_DIFF_PPM);
+    if(rdb_flag){
+      printf(" and integer non-negative RDB values:\n");
+    }else{
+      printf(":\n");
+    };
+    printf("%25s  %10s  %12s %11s  %4s\n","Formula", "Theory", "Mass diff", "Mass diff", "RDB");
     for(i=0;i<n_print;i++){
       Print_Formula(CHEM_LIST[i].f,fs);
-      printf("%25s: %10.6f  %10.6f Da %7.3f ppm\n",fs, 
-	  CHEM_LIST[i].mass, CHEM_LIST[i].mass_diff, CHEM_LIST[i].mass_diff_ppm);
+      printf("%25s: %7.6f  %8.3f mDa %7.3f ppm  %4.1f\n",fs, 
+          CHEM_LIST[i].mass, CHEM_LIST[i].mass_diff*1000.0, CHEM_LIST[i].mass_diff_ppm, CHEM_LIST[i].RDB);
+    }
+    if (! rdb_flag){
+      printf("use --chem-rdb instead of --chem \nto ignore formulas with NEGATIVE or HALF-INTEGER RDB values\n");
     }
     return(0);
   }else{
@@ -150,7 +177,7 @@ double Print_Formula_Mass(formula_t fi, mass_t mt)
     mass+=me;
     if(fi[e])
       printf("%2s %2d %9.6f %11.6f\n", 
-	Isotopes[e].name, fi[e], Isotopes[e].dmass, me);
+        Isotopes[e].name, fi[e], Isotopes[e].dmass, me);
   }
   printf("------------------------------\n");
 /*  for(m=0;m<NM;m++){*/
