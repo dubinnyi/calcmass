@@ -15,7 +15,7 @@ isotope_t Isotopes[NI] =
   { "N", 14, 14.003074, 3, True  },  /*  3  NITROGEN    */
   { "O", 16, 15.994915, 2, True  },  /*  4  OXIGEN      */
   { "P", 31, 30.973763, 5, False },  /*  5  PHOSPHORUS  */
-  { "S", 32, 31.972072, 2, False },  /*  6  SERUM       */ 
+  { "S", 32, 31.972072, 6, True },  /*  6  SERUM       */ 
   {"Na", 23, 22.989770, 1, True  },  /*  7  SODIUM      */ 
   {"Ca", 40, 39.962591, 2, True  },  /*  8  CALCIUM     */ 
   { "K", 39, 38.963708, 1, True },  /*  9  POTASSIUM   */ 
