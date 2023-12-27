@@ -34,10 +34,10 @@ int main(int argc, char** argv)
   mass_type_init();
 
   printf("\ncalcmass by Maxim A. Dubinnyi\n", NI);
-  printf("Version 2021-09-11\n");
-  printf("\nDatabase of %d known isotopes loaded:\n", NI);
-  for(i=0;i<NI;i++)
-    printf("%s(%d)%s",Isotopes[i].name, Isotopes[i].imass, i==NI-1?"\n":", ");
+  printf("Version 2023-12-27\n");
+  //printf("\nDatabase of %d known isotopes loaded:\n", NI);
+  //for(i=0;i<NI;i++)
+  //  printf("%s(%d)%s",Isotopes[i].name, Isotopes[i].imass, i==NI-1?"\n":", ");
 
   if(argc<4){
     printf(
@@ -73,7 +73,9 @@ int main(int argc, char** argv)
   if(strcmp(argv[1],"-mass")==0 || strcmp(argv[1],"--mass")==0){
     Parse_Formula(argv[3],fi);
     Print_Formula(fi,fs);
-    printf("\nParsed formula: \'%s\'\n",fs);
+    double rdb;
+    Calc_RDB(fi, &rdb);
+    printf("\nParsed formula: \'%s\', RDB = %4.1f\n",fs, rdb);
     mass=Print_Formula_Mass(fi,MT);
     return(0);
   }else if(strcmp(argv[1],"-chem")==0 || strcmp(argv[1],"--chem")==0 ||

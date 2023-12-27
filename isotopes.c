@@ -15,30 +15,30 @@ isotope_t Isotopes[NI] =
   { "N", 14, 14.003074, 3, True  },  /*  3  NITROGEN    */
   { "O", 16, 15.994915, 2, True  },  /*  4  OXIGEN      */
   { "P", 31, 30.973763, 5, False },  /*  5  PHOSPHORUS  */
-  { "S", 32, 31.972072, 6, True },  /*  6  SERUM       */ 
+  { "S", 32, 31.972072, 6, True },   /*  6  SERUM       */ 
   {"Na", 23, 22.989770, 1, True  },  /*  7  SODIUM      */ 
   {"Ca", 40, 39.962591, 2, True  },  /*  8  CALCIUM     */ 
-  { "K", 39, 38.963708, 1, True },  /*  9  POTASSIUM   */ 
+  { "K", 39, 38.963708, 1, True },   /*  9  POTASSIUM   */ 
   
-  { "B", 11, 11.009305, 3, True },  /* 10  BORON       */ 
-  { "F", 19, 18.998403, 1, True },  /* 11  FLUORINE    */ 
-  {"Cl", 35, 34.968853, 1, True },  /* 12  CHLORINE    */ 
-  {"Br", 79, 78.918336, 1, True },  /* 13  BROMINE     */ 
+  { "B", 11, 11.009305, 3, True },   /* 10  BORON       */ 
+  { "F", 19, 18.998403, 1, True },   /* 11  FLUORINE    */ 
+  {"Cl", 35, 34.968853, 1, True },   /* 12  CHLORINE    */ 
+  {"Br", 79, 78.918336, 1, True },   /* 13  BROMINE     */ 
 };
 
 mass_type_t Mass[NM]={
-/* name, elem1,count1,elem2,count2,elem3,count3,madd,charge */
- {"[M] ",      0,   0,    0,     0,    0,     0, 0.0, +1},  /* MASS_M:      No changes, but set 1   */
- {"[M+H]+",    2,   1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_H:    1H(+1), e(-1) */
- {"[M+Na]+",   7,   1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_Na: 23Na(+1), e(-1) */
- {"[M+Ca-H]+", 8,   1,    0,    -1,    2,    -1, 0.0, +1},  /* MASS_POS_Ca: 40Ca(+1), e(-1) H(-1)*/
- {"[M-H]-",    2,  -1,    0,    +1,    0,     0, 0.0, -1},  /* MASS_NEG_H:    1H(-1), e(+1) */
- {"[M]+",      0,  -1,    0,     0,    0,     0, 0.0, +1},  /* MASS_POS:      e(-1) */
- {"[M]-",      0,  +1,    0,     0,    0,     0, 0.0, -1},  /* MASS_NEG:      e(+1) */
- {"[M+K]+",    9,   1,    0,    -1,    0,     0, 0.0, +1},  /* MASS_POS_K:  39K(+1),  e(-1) */
- {"[M+2H]++",  2,   2,    0,    -2,    0,     0, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
- {"[M+H+Na]++",2,   1,    0,    -2,    7,     1, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
- {"[M+2Na]++", 7,   2,    0,    -2,    0,     0, 0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+/* name, elem1,count1,elem2,count2,elem3,count3, madd,charge */
+ {"[M] ",      0,   0,    0,     0,    0,     0,  0.0, +1},  /* MASS_M:      No changes, but set 1   */
+ {"[M+H]+",    2,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_H:    1H(+1), e(-1) */
+ {"[M+Na]+",   7,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_Na: 23Na(+1), e(-1) */
+ {"[M+Ca-H]+", 8,   1,    0,    -1,    2,    -1,  0.0, +1},  /* MASS_POS_Ca: 40Ca(+1), e(-1) H(-1)*/
+ {"[M-H]-",    2,  -1,    0,    +1,    0,     0,  0.0, -1},  /* MASS_NEG_H:    1H(-1), e(+1) */
+ {"[M]+",      0,  -1,    0,     0,    0,     0,  0.0, +1},  /* MASS_POS:      e(-1) */
+ {"[M]-",      0,  +1,    0,     0,    0,     0,  0.0, -1},  /* MASS_NEG:      e(+1) */
+ {"[M+K]+",    9,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_K:  39K(+1),  e(-1) */
+ {"[M+2H]++",  2,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+ {"[M+H+Na]++",2,   1,    0,    -2,    7,     1,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+ {"[M+2Na]++", 7,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
 };
 
 void mass_type_init()
@@ -49,9 +49,9 @@ void mass_type_init()
       Isotopes[Mass[m].elem1].dmass*Mass[m].count1+
       Isotopes[Mass[m].elem2].dmass*Mass[m].count2+
       Isotopes[Mass[m].elem3].dmass*Mass[m].count3;
-    Mass[m].charge=(Mass[m].elem1==0?(-Mass[m].count1):0)+
-                   (Mass[m].elem2==0?(-Mass[m].count2):0)+
-                   (Mass[m].elem3==0?(-Mass[m].count3):0);
+    //Mass[m].charge=(Mass[m].elem1==0?(-Mass[m].count1):0)+
+    //               (Mass[m].elem2==0?(-Mass[m].count2):0)+
+    //               (Mass[m].elem3==0?(-Mass[m].count3):0);
   };
   Mass_Init_Flag=1;
 };
@@ -115,7 +115,7 @@ double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M)
 /*  if( charge == 0 || charge == 0.0)
     return(mass/charge);
   else */
-    return(mass);
+    return(mass/fabs(charge));
 }
 
 int Mass_Diff(const void *fm1, const void *fm2)
