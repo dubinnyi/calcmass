@@ -31,10 +31,19 @@ int main(int argc, char** argv)
   mass_t MT;
   int rdb_flag = 0;
 
+  /*MT = MASS_POS_H;
+  printf("MASS_POS_H = %d\n",MASS_POS_H);
+  printf("        MT = %d\n",MT);
+  printf("Mass_Init_Flag = %d before mass_type_init()\n", Mass_Init_Flag);
+  printf("Mass[MASS_POS_H].madd = %9.6f\n",Mass[MASS_POS_H].madd);
+  printf("Mass[MT].madd = %9.6f\n",Mass[MT].madd);*/
   mass_type_init();
+  /*printf("Mass_Init_Flag = %d after mass_type_init()\n", Mass_Init_Flag);
+  printf("Mass[MASS_POS_H].madd = %9.6f\n",Mass[MASS_POS_H].madd);
+  printf("Mass[MT].madd = %9.6f\n",Mass[MT].madd);*/
 
   printf("\ncalcmass by Maxim A. Dubinnyi\n", NI);
-  printf("Version 2023-12-27\n");
+  printf("Version 2024-03-01\n");
   //printf("\nDatabase of %d known isotopes loaded:\n", NI);
   //for(i=0;i<NI;i++)
   //  printf("%s(%d)%s",Isotopes[i].name, Isotopes[i].imass, i==NI-1?"\n":", ");
@@ -60,6 +69,9 @@ int main(int argc, char** argv)
   else if(strcmp(argv[2],"MCa+")==0)MT=MASS_POS_Ca;
   else if(strcmp(argv[2],"MH-")==0) MT=MASS_NEG_H;
   else if(strcmp(argv[2],"M2H++")==0) MT=MASS_POS_2H;
+  else if(strcmp(argv[2],"MH++")==0) MT=MASS_POS_2H;
+  else if(strcmp(argv[2],"MH2+")==0) MT=MASS_POS_2H;
+  else if(strcmp(argv[2],"MH+2")==0) MT=MASS_POS_2H;
   else if(strcmp(argv[2],"MHNa++")==0) MT=MASS_POS_HNa;
   else if(strcmp(argv[2],"M2Na++")==0) MT=MASS_POS_2Na;
   else{
@@ -67,8 +79,11 @@ int main(int argc, char** argv)
     return(-1);
   }
  
-  printf("Mass type is \'%s\' (%d), charge= %2.1f, madd=%9.6f \n", 
+  //printf("        MT = %d\n",MT);
+  printf("Mass type is \'%s\' (%d), charge= %d, madd=%9.6f \n", 
       Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
+  //printf("Mass[MT].charge = %d\n", Mass[MT].charge);
+  //printf("Mass[MT].madd = %9.6f\n", Mass[MT].madd);
 
   if(strcmp(argv[1],"-mass")==0 || strcmp(argv[1],"--mass")==0){
     Parse_Formula(argv[3],fi);

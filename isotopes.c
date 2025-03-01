@@ -2,7 +2,6 @@
 #include <math.h>
 #include "isotopes.h"
 
-static int Mass_Init_Flag;
 
 #define False 0
 #define True  1
@@ -25,6 +24,8 @@ isotope_t Isotopes[NI] =
   {"Cl", 35, 34.968853, 1, True },   /* 12  CHLORINE    */ 
   {"Br", 79, 78.918336, 1, True },   /* 13  BROMINE     */ 
 };
+
+int Mass_Init_Flag=0;
 
 mass_type_t Mass[NM]={
 /* name, elem1,count1,elem2,count2,elem3,count3, madd,charge */
@@ -76,7 +77,7 @@ double Calc_Mass(formula_t fi, mass_t M)
 int Calc_RDB(formula_t fi, double *rbd)
   /* input:  formula_t  fi   */
   /* output: double    *rbd  */
-  /* return  1 if unambiguous, 0 if ambiguous (solfur, phosphorus are in
+  /* return  1 if unambiguous, 0 if ambiguous (sulfur, phosphorus are in
    * the formula */
 {
   *rbd = 1.0;

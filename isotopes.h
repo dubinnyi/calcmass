@@ -59,7 +59,7 @@ typedef struct {
 
 extern mass_type_t Mass[NM];
 
-static int Mass_Init_Flag=0;
+extern int Mass_Init_Flag;
 
 double Calc_Mass(formula_t fi, mass_t M);
 int Calc_RDB(formula_t fi, double *rbd);
