@@ -1,3 +1,16 @@
+/**
+ * @file calcmass.c
+ * @brief CLI entry point and output formatting for the calcmass mass-spectrometry tool.
+ *
+ * Provides two primary command-line modes:
+ * 1. `-mass` / `--mass <adduct> <formula>`
+ *    Calculates monoisotopic mass, m/z ratio, elemental breakdown, and RDB for a formula.
+ * 2. `-chem` / `--chem` / `-chem-rdb` / `--chem-rdb <adduct> <limits> <target_mass>`
+ *    Enumerates candidate formulas within the given element bounds, retains the closest
+ *    matches within `MAX_DIFF` (Da) and `MAX_DIFF_PPM` (ppm), and prints up to `N_Best`
+ *    results sorted by absolute mass error.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -11,14 +24,23 @@ double Print_Formula_Mass(formula_t fi, mass_t mt);
 void Print_Formula(formula_t fi, char *str, size_t str_size);
 void Print_Limits(limits_t lim, char *str, size_t str_size);
 
+/** @brief Maximum number of top-ranked candidate formulas retained and displayed. */
 #define N_Best 30
+/** @brief Maximum absolute mass difference (Da) for printing search hits. */
 #define MAX_DIFF 0.1
+/** @brief Maximum relative mass difference (ppm) for printing search hits. */
 #define MAX_DIFF_PPM 20.0
+/** @brief Capacity of the working candidate buffer flushed via qsort down to N_Best. */
 #define N_Chem 512
 
 static fmass_t CHEM_LIST[N_Chem];
 static fmass_t *chem = CHEM_LIST;
 
+/**
+ * @brief Print command-line usage instructions to stdout.
+ *
+ * @param[in] argc Actual argument count received by `main()`, reported in the diagnostic line.
+ */
 static void print_usage(int argc)
 {
   printf(
@@ -32,6 +54,19 @@ static void print_usage(int argc)
     "[Chemical limits]  is in the form C8-10,N6,O1-2,H1-13,Cl\n", argc);
 }
 
+/**
+ * @brief Program entry point: parses CLI arguments and dispatches `-mass` or `-chem` modes.
+ *
+ * Argument contract:
+ * - `argv[1]`: Mode flag: `-mass`/`--mass`, `-chem`/`--chem`, or `-chem-rdb`/`--chem-rdb`.
+ * - `argv[2]`: Ion/adduct name (e.g., `M`, `MH+`, `MNa+`, `M2H++`).
+ * - `argv[3]`: Chemical formula (in `-mass` mode) or element limits (in `-chem` modes).
+ * - `argv[4]`: Required in `-chem` modes; strictly positive finite target mass/m/z in Da.
+ *
+ * @param[in] argc Number of command-line arguments (must be >= 4 for `-mass`, >= 5 for `-chem`).
+ * @param[in] argv Array of NUL-terminated command-line argument strings.
+ * @return `0` on success; `1` on invalid arguments, unknown mode/adduct, or invalid target mass.
+ */
 int main(int argc, char **argv)
 {
   formula_t fi, *pfi = &fi;
@@ -181,6 +216,17 @@ int main(int argc, char **argv)
   }
 }
 
+/**
+ * @brief Print an elemental mass breakdown, adduct mass `(M)`, and `(M/Z)` to stdout.
+ *
+ * Prints each non-zero isotope contribution in `fi`, followed by the adduct-adjusted
+ * total mass `(M)` and mass-to-charge ratio `(M/Z)` (or `"N/A (neutral)"` when net
+ * charge is 0).
+ *
+ * @param[in] fi Composition vector with initialized entries in `[0, NI)`.
+ * @param[in] mt Adduct type selector; must be a valid `mass_t` value in `[0, NM)`.
+ * @return Sum of elemental masses in `fi` (in Da) before adding `Mass[mt].madd`.
+ */
 double Print_Formula_Mass(formula_t fi, mass_t mt)
 {
   int e;
@@ -206,6 +252,19 @@ double Print_Formula_Mass(formula_t fi, mass_t mt)
   return mass;
 }
 
+/**
+ * @brief Format a `formula_t` composition vector as a comma-separated string.
+ *
+ * Emits elements in `Isotopes[]` order (`1 .. NI-1`), omitting count `1` (e.g.,
+ * `"C10,H13,N6,O2,Cl"`), and appends any explicit charge encoded in `fi[0]`
+ * (`-` for `fi[0] > 0`, `+` for `fi[0] < 0`, with magnitude suffix when `|fi[0]| >= 2`).
+ * Output is safely truncated to fit within `str_size` and always NUL-terminated
+ * when `str_size > 0`.
+ *
+ * @param[in]  fi       Composition vector with initialized entries in `[0, NI)`.
+ * @param[out] str      Destination character buffer; must be non-NULL when `str_size > 0`.
+ * @param[in]  str_size Total capacity of `str` in bytes (including NUL terminator).
+ */
 void Print_Formula(formula_t fi, char *str, size_t str_size)
 {
   int e, n, flag = 0;
@@ -253,6 +312,17 @@ void Print_Formula(formula_t fi, char *str, size_t str_size)
   }
 }
 
+/**
+ * @brief Format a `limits_t` bounds array as a comma-separated range string.
+ *
+ * Emits `"<Symbol><min>-<max>"` for each element `e` in `[1, NI)` whose `max != 0`
+ * (e.g., `"C8-10,H1-13,N6-6,O1-2,Cl1-1"`). Output is safely truncated to `str_size`
+ * and always NUL-terminated when `str_size > 0`.
+ *
+ * @param[in]  lim      Element bounds array with initialized entries in `[1, NI)`.
+ * @param[out] str      Destination character buffer; must be non-NULL when `str_size > 0`.
+ * @param[in]  str_size Total capacity of `str` in bytes (including NUL terminator).
+ */
 void Print_Limits(limits_t lim, char *str, size_t str_size)
 {
   int e, n, flag = 0;

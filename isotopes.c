@@ -1,3 +1,15 @@
+/**
+ * @file isotopes.c
+ * @brief Built-in isotope/adduct tables and mass, charge, m/z, and RDB calculations.
+ *
+ * Defines the static monoisotopic element database (`Isotopes[]`), adduct definitions
+ * (`Mass[]`), and core numerical functions used both for single-formula mass calculation
+ * and for scoring candidate formulas against a target mass.
+ *
+ * Note: Adduct mass deltas (`Mass[m].madd`) are lazily initialized via `mass_type_init()`
+ * on first calculation if not already called explicitly at startup.
+ */
+
 #include <stdio.h>
 #include <math.h>
 #include "isotopes.h"
@@ -41,6 +53,13 @@ mass_type_t Mass[NM] = {
  {"[M+2Na]++", 7,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2Na: 23Na(+2), e(-2)     */
 };
 
+/**
+ * @brief Precompute exact mass offsets (`madd`) for every entry in `Mass[]`.
+ *
+ * Computes `Mass[m].madd` from the three (isotope index, signed count) pairs
+ * defined in each `mass_type_t` entry and sets `Mass_Init_Flag = 1`.
+ * Safe to call multiple times (idempotent).
+ */
 void mass_type_init(void)
 {
   int m;
@@ -53,12 +72,33 @@ void mass_type_init(void)
   Mass_Init_Flag = 1;
 }
 
+/**
+ * @brief Calculate the neutral monoisotopic mass of a chemical formula.
+ *
+ * Convenience wrapper equivalent to `Calc_Mass(fi, MASS_M)`.
+ * Lazily invokes `mass_type_init()` if not yet initialized.
+ *
+ * @param[in] fi Composition vector of length at least `NI`; elements `[0, NI)`
+ *               must be initialized (non-negative atom counts; index 0 is electron count).
+ * @return Exact monoisotopic mass in Daltons (Da).
+ */
 double Calc_Mass_M(formula_t fi)
 {
   if (!Mass_Init_Flag) mass_type_init();
   return Calc_Mass(fi, MASS_M);
 }
 
+/**
+ * @brief Calculate the exact monoisotopic mass of a formula with an adduct applied.
+ *
+ * Sums `Isotopes[e].dmass * fi[e]` for all `e` in `[0, NI)` (including any explicit
+ * electron adjustment at `fi[0]`) and adds the adduct offset `Mass[M].madd`.
+ * Lazily invokes `mass_type_init()` if not yet initialized.
+ *
+ * @param[in] fi Composition vector with initialized entries in `[0, NI)`.
+ * @param[in] M  Adduct type selector; must be a valid `mass_t` value in `[0, NM)`.
+ * @return Total monoisotopic mass of the species in Daltons (Da), not divided by charge.
+ */
 double Calc_Mass(formula_t fi, mass_t M)
 {
   int e;
@@ -70,11 +110,19 @@ double Calc_Mass(formula_t fi, mass_t M)
   return mass;
 }
 
+/**
+ * @brief Calculate Ring and Double Bond (RDB) equivalents for a chemical formula.
+ *
+ * Uses the standard formula: `RDB = 1 + sum_{e=1}^{NI-1} ((valence_e - 2) / 2) * count_e`.
+ * Index 0 (electrons) is intentionally skipped so explicit ion charge does not skew RDB.
+ * Lazily invokes `mass_type_init()` if not yet initialized.
+ *
+ * @param[in]  fi  Composition vector with initialized entries in `[0, NI)`.
+ * @param[out] rdb Pointer to receive the computed RDB value; must be non-NULL.
+ * @return 1 (`True`) if every present element has an unambiguous valence (`v_unambig != 0`);
+ *         0 (`False`) if any present element has variable valence (e.g., phosphorus).
+ */
 int Calc_RDB(formula_t fi, double *rdb)
-  /* input:  formula_t  fi   */
-  /* output: double    *rdb  */
-  /* return  1 if unambiguous, 0 if ambiguous (sulfur, phosphorus are in
-   * the formula) */
 {
   *rdb = 1.0;
   int unambig_flag = True;
@@ -90,6 +138,17 @@ int Calc_RDB(formula_t fi, double *rdb)
   return unambig_flag;
 }
 
+/**
+ * @brief Calculate the total net electric charge of a formula and adduct.
+ *
+ * Combines the intrinsic charge implied by explicit electrons in the formula
+ * (`-fi[0]`) with the adduct charge (`Mass[M].charge`).
+ * Lazily invokes `mass_type_init()` if not yet initialized.
+ *
+ * @param[in] fi Composition vector with initialized `fi[0]` (excess electrons).
+ * @param[in] M  Adduct type selector; must be a valid `mass_t` value in `[0, NM)`.
+ * @return Signed net charge as a floating-point integer (e.g., `0.0`, `+1.0`, `-1.0`, `+2.0`).
+ */
 double Calc_Charge(formula_t fi, mass_t M)
 {
   double charge = 0.0;
@@ -100,6 +159,17 @@ double Calc_Charge(formula_t fi, mass_t M)
   return charge;
 }
 
+/**
+ * @brief Calculate the mass-to-charge ratio (m/z) of a formula with an adduct.
+ *
+ * Divides `Calc_Mass(fi, M)` by `fabs(Calc_Charge(fi, M))`. If the net charge is
+ * zero (e.g., neutral molecule with `MASS_M`), returns the undivided monoisotopic
+ * mass directly to avoid division by zero.
+ *
+ * @param[in] fi Composition vector with initialized entries in `[0, NI)`.
+ * @param[in] M  Adduct type selector; must be a valid `mass_t` value in `[0, NM)`.
+ * @return Theoretical m/z value in Da/e, or neutral mass in Da when net charge is 0.
+ */
 double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M)
 {
   double mass = Calc_Mass(fi, M);
@@ -110,6 +180,18 @@ double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M)
   return mass / fabs(charge);
 }
 
+/**
+ * @brief Standard `qsort` comparator for `fmass_t` entries by absolute mass error.
+ *
+ * Establishes a strict weak ordering on `fabs(mass_diff)` so the closest
+ * theoretical formulas to the target mass sort first.
+ *
+ * @param[in] fm1 Pointer to the first `fmass_t` element; must be non-NULL.
+ * @param[in] fm2 Pointer to the second `fmass_t` element; must be non-NULL.
+ * @return `-1` if `|fm1->mass_diff| < |fm2->mass_diff|`,
+ *         `+1` if `|fm1->mass_diff| > |fm2->mass_diff|`,
+ *          `0` if equal.
+ */
 int Mass_Diff(const void *fm1, const void *fm2)
 {
   double d1 = fabs(((const fmass_t *)fm1)->mass_diff);
