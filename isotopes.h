@@ -1,10 +1,9 @@
-#ifdef ISOTOPES_H_INCLUDED
+#ifndef ISOTOPES_H_INCLUDED
 #define ISOTOPES_H_INCLUDED
-#else 
 
 #define NI 14 /* Number of isotopes */
 
-typedef struct 
+typedef struct
 {
   char   name[3];
   int    imass;
@@ -17,7 +16,6 @@ extern isotope_t Isotopes[NI];
 
 typedef int formula_t[NI+1];
 typedef struct {int min, max;} int_limits_t;
-//typedef struct {formula_t min, max} limits_t;
 typedef int_limits_t limits_t[NI+1];
 
 typedef struct {
@@ -26,15 +24,15 @@ typedef struct {
   double mass_diff;
   double mass_diff_ppm;
   double RDB;  /* Ring and Double Bond counter */
-               /* Neutral formula should have integer and non-nagative RDB value */
-               /* half-integer and nagative RDB means broken valance rules */
+               /* Neutral formula should have integer and non-negative RDB value */
+               /* half-integer and negative RDB means broken valence rules */
 } fmass_t;
 
 int Mass_Diff(const void *fm1, const void *fm2);
 
 #define NM 11 /* Number of mass types */
 
-typedef enum { 
+typedef enum {
   MASS_M,
   MASS_POS_H,
   MASS_POS_Na,
@@ -62,19 +60,18 @@ extern mass_type_t Mass[NM];
 extern int Mass_Init_Flag;
 
 double Calc_Mass(formula_t fi, mass_t M);
-int Calc_RDB(formula_t fi, double *rbd);
+int    Calc_RDB(formula_t fi, double *rdb);
 double Calc_Charge(formula_t fi, mass_t M);
 double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M);
 double Calc_Mass_M(formula_t fi);
-void   mass_type_init();
+void   mass_type_init(void);
 
-void Parse_Formula(char * fc, formula_t fi);
-void Parse_Limits(char * fc, limits_t lim);
+void Parse_Formula(const char *fc, formula_t fi);
+void Parse_Limits(const char *fc, limits_t lim);
 
 void Loop_Copy(formula_t *dst, formula_t *src);
 void Loop_Init(formula_t *ft, limits_t *lim);
 void Loop_Next(formula_t *ft, limits_t *lim);
 int  Loop_End(formula_t *ft, limits_t *lim);
-
 
 #endif /* ISOTOPES_H_INCLUDED */

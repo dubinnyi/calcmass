@@ -2,7 +2,6 @@
 #include <math.h>
 #include "isotopes.h"
 
-
 #define False 0
 #define True  1
 
@@ -12,114 +11,111 @@ isotope_t Isotopes[NI] =
   { "C", 12, 12.000000, 4, True  },  /*  1  CARBON      */
   { "H",  1,  1.007825, 1, True  },  /*  2  PROTON      */
   { "N", 14, 14.003074, 3, True  },  /*  3  NITROGEN    */
-  { "O", 16, 15.994915, 2, True  },  /*  4  OXIGEN      */
+  { "O", 16, 15.994915, 2, True  },  /*  4  OXYGEN      */
   { "P", 31, 30.973763, 5, False },  /*  5  PHOSPHORUS  */
-  { "S", 32, 31.972072, 6, True },   /*  6  SERUM       */ 
-  {"Na", 23, 22.989770, 1, True  },  /*  7  SODIUM      */ 
-  {"Ca", 40, 39.962591, 2, True  },  /*  8  CALCIUM     */ 
-  { "K", 39, 38.963708, 1, True },   /*  9  POTASSIUM   */ 
-  
-  { "B", 11, 11.009305, 3, True },   /* 10  BORON       */ 
-  { "F", 19, 18.998403, 1, True },   /* 11  FLUORINE    */ 
-  {"Cl", 35, 34.968853, 1, True },   /* 12  CHLORINE    */ 
-  {"Br", 79, 78.918336, 1, True },   /* 13  BROMINE     */ 
+  { "S", 32, 31.972072, 6, True  },  /*  6  SULFUR      */
+  {"Na", 23, 22.989770, 1, True  },  /*  7  SODIUM      */
+  {"Ca", 40, 39.962591, 2, True  },  /*  8  CALCIUM     */
+  { "K", 39, 38.963708, 1, True  },  /*  9  POTASSIUM   */
+
+  { "B", 11, 11.009305, 3, True  },  /* 10  BORON       */
+  { "F", 19, 18.998403, 1, True  },  /* 11  FLUORINE    */
+  {"Cl", 35, 34.968853, 1, True  },  /* 12  CHLORINE    */
+  {"Br", 79, 78.918336, 1, True  },  /* 13  BROMINE     */
 };
 
-int Mass_Init_Flag=0;
+int Mass_Init_Flag = 0;
 
-mass_type_t Mass[NM]={
+mass_type_t Mass[NM] = {
 /* name, elem1,count1,elem2,count2,elem3,count3, madd,charge */
- {"[M] ",      0,   0,    0,     0,    0,     0,  0.0, +1},  /* MASS_M:      No changes, but set 1   */
- {"[M+H]+",    2,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_H:    1H(+1), e(-1) */
- {"[M+Na]+",   7,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_Na: 23Na(+1), e(-1) */
- {"[M+Ca-H]+", 8,   1,    0,    -1,    2,    -1,  0.0, +1},  /* MASS_POS_Ca: 40Ca(+1), e(-1) H(-1)*/
- {"[M-H]-",    2,  -1,    0,    +1,    0,     0,  0.0, -1},  /* MASS_NEG_H:    1H(-1), e(+1) */
- {"[M]+",      0,  -1,    0,     0,    0,     0,  0.0, +1},  /* MASS_POS:      e(-1) */
- {"[M]-",      0,  +1,    0,     0,    0,     0,  0.0, -1},  /* MASS_NEG:      e(+1) */
- {"[M+K]+",    9,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_K:  39K(+1),  e(-1) */
- {"[M+2H]++",  2,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
- {"[M+H+Na]++",2,   1,    0,    -2,    7,     1,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
- {"[M+2Na]++", 7,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2) */
+ {"[M]",       0,   0,    0,     0,    0,     0,  0.0,  0},  /* MASS_M:       Neutral molecule    */
+ {"[M+H]+",    2,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_H:   1H(+1), e(-1)       */
+ {"[M+Na]+",   7,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_Na:  23Na(+1), e(-1)     */
+ {"[M+Ca-H]+", 8,   1,    0,    -1,    2,    -1,  0.0, +1},  /* MASS_POS_Ca:  40Ca(+1), e(-1), H(-1) */
+ {"[M-H]-",    2,  -1,    0,    +1,    0,     0,  0.0, -1},  /* MASS_NEG_H:   1H(-1), e(+1)       */
+ {"[M]+",      0,  -1,    0,     0,    0,     0,  0.0, +1},  /* MASS_POS:     e(-1)               */
+ {"[M]-",      0,  +1,    0,     0,    0,     0,  0.0, -1},  /* MASS_NEG:     e(+1)               */
+ {"[M+K]+",    9,   1,    0,    -1,    0,     0,  0.0, +1},  /* MASS_POS_K:   39K(+1), e(-1)      */
+ {"[M+2H]++",  2,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2H:  1H(+2), e(-2)       */
+ {"[M+H+Na]++",2,   1,    0,    -2,    7,     1,  0.0, +2},  /* MASS_POS_HNa: 1H(+1), 23Na(+1), e(-2) */
+ {"[M+2Na]++", 7,   2,    0,    -2,    0,     0,  0.0, +2},  /* MASS_POS_2Na: 23Na(+2), e(-2)     */
 };
 
-void mass_type_init()
+void mass_type_init(void)
 {
   int m;
-  for(m=0;m<NM;m++){
-    Mass[m].madd=
-      Isotopes[Mass[m].elem1].dmass*Mass[m].count1+
-      Isotopes[Mass[m].elem2].dmass*Mass[m].count2+
-      Isotopes[Mass[m].elem3].dmass*Mass[m].count3;
-    //Mass[m].charge=(Mass[m].elem1==0?(-Mass[m].count1):0)+
-    //               (Mass[m].elem2==0?(-Mass[m].count2):0)+
-    //               (Mass[m].elem3==0?(-Mass[m].count3):0);
-  };
-  Mass_Init_Flag=1;
-};
+  for (m = 0; m < NM; m++) {
+    Mass[m].madd =
+      Isotopes[Mass[m].elem1].dmass * Mass[m].count1 +
+      Isotopes[Mass[m].elem2].dmass * Mass[m].count2 +
+      Isotopes[Mass[m].elem3].dmass * Mass[m].count3;
+  }
+  Mass_Init_Flag = 1;
+}
 
 double Calc_Mass_M(formula_t fi)
 {
-  if(!Mass_Init_Flag)mass_type_init();
-  return(Calc_Mass(fi, MASS_M));
-};
+  if (!Mass_Init_Flag) mass_type_init();
+  return Calc_Mass(fi, MASS_M);
+}
 
 double Calc_Mass(formula_t fi, mass_t M)
 {
   int e;
-  double mass=0.0, me;
+  double mass = 0.0;
 
-  if(!Mass_Init_Flag)mass_type_init();
-  for(e=0;e<NI;e++)mass+=Isotopes[e].dmass*fi[e];
-  mass+=Mass[M].madd;
-  return(mass);
-};
+  if (!Mass_Init_Flag) mass_type_init();
+  for (e = 0; e < NI; e++) mass += Isotopes[e].dmass * fi[e];
+  mass += Mass[M].madd;
+  return mass;
+}
 
-int Calc_RDB(formula_t fi, double *rbd)
+int Calc_RDB(formula_t fi, double *rdb)
   /* input:  formula_t  fi   */
-  /* output: double    *rbd  */
+  /* output: double    *rdb  */
   /* return  1 if unambiguous, 0 if ambiguous (sulfur, phosphorus are in
-   * the formula */
+   * the formula) */
 {
-  *rbd = 1.0;
+  *rdb = 1.0;
   int unambig_flag = True;
   int e;
-  
-  if(!Mass_Init_Flag)mass_type_init();
-  for(e=0;e<NI;e++){
-    /* Formula for RDB */
-    (*rbd) += (Isotopes[e].valence-2.0)/2.0*fi[e];
-    if(fi[e])
-      unambig_flag &= (Isotopes[e].v_unambig) ;
+
+  if (!Mass_Init_Flag) mass_type_init();
+  /* Start at e = 1 to skip electrons (index 0) */
+  for (e = 1; e < NI; e++) {
+    (*rdb) += (Isotopes[e].valence - 2.0) / 2.0 * fi[e];
+    if (fi[e])
+      unambig_flag &= Isotopes[e].v_unambig;
   }
   return unambig_flag;
 }
 
 double Calc_Charge(formula_t fi, mass_t M)
 {
-  int e;
-  double me;
-  double charge=0.0;
+  double charge = 0.0;
 
-  if(!Mass_Init_Flag)mass_type_init();
-  charge=-fi[0];
-  charge+=Mass[M].charge;
-  return(charge);
-};
+  if (!Mass_Init_Flag) mass_type_init();
+  charge = -fi[0];
+  charge += Mass[M].charge;
+  return charge;
+}
 
 double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M)
 {
-  double mass;
-  double charge;
+  double mass = Calc_Mass(fi, M);
+  double charge = Calc_Charge(fi, M);
 
-  mass =   Calc_Mass(fi,M);
-  charge = Calc_Charge(fi, M);
-/*  if( charge == 0 || charge == 0.0)
-    return(mass/charge);
-  else */
-    return(mass/fabs(charge));
+  if (charge == 0.0)
+    return mass;
+  return mass / fabs(charge);
 }
 
 int Mass_Diff(const void *fm1, const void *fm2)
 {
-  return( fabs(((fmass_t*)fm1)->mass_diff)>fabs(((fmass_t*)fm2)->mass_diff) );
-};
+  double d1 = fabs(((const fmass_t *)fm1)->mass_diff);
+  double d2 = fabs(((const fmass_t *)fm2)->mass_diff);
+
+  if (d1 < d2) return -1;
+  if (d1 > d2) return 1;
+  return 0;
+}

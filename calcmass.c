@@ -3,257 +3,278 @@
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
+#include <errno.h>
 
 #include "isotopes.h"
 
-#define DEBUG 0
-#define IFDEBUG if(DEBUG)
-
-void get_formula(char * fc, formula_t fi);
 double Print_Formula_Mass(formula_t fi, mass_t mt);
-void Print_Formula(formula_t fi, char* str);
-void Print_Limits(limits_t lim, char* str);
+void Print_Formula(formula_t fi, char *str, size_t str_size);
+void Print_Limits(limits_t lim, char *str, size_t str_size);
 
 #define N_Best 30
 #define MAX_DIFF 0.1
 #define MAX_DIFF_PPM 20.0
 #define N_Chem 512
-fmass_t CHEM_LIST[N_Chem];
-fmass_t *chem = CHEM_LIST;
 
-int main(int argc, char** argv)
+static fmass_t CHEM_LIST[N_Chem];
+static fmass_t *chem = CHEM_LIST;
+
+static void print_usage(int argc)
 {
-  int i;
-  formula_t fi,  *pfi=&fi;
-  limits_t  lim, *plim=&lim;
-  double mass, Target_Mass, *TM=&Target_Mass;
+  printf(
+    "Too few arguments found (%d).\nUsage:\n"
+    "calcmass -mass [type] [Chemical formula]\n"
+    "calcmass -chem [type] [Chemical limits] [mass]\n"
+    "calcmass --chem-rdb [type] [Chemical limits] [mass]\n\n"
+    "[type] is one of M, M+, M-, MH+, MNa+, MK+, MCa+, MH-,\n"
+    "                 M2H++ (MH++, MH2+, MH+2), MHNa++, M2Na++\n"
+    "[Chemical formula] is in the form C10,N6,O2,H13,Cl or C10H13N6O2Cl\n"
+    "[Chemical limits]  is in the form C8-10,N6,O1-2,H1-13,Cl\n", argc);
+}
+
+int main(int argc, char **argv)
+{
+  formula_t fi, *pfi = &fi;
+  limits_t lim, *plim = &lim;
+  double Target_Mass;
   char fs[1024];
   mass_t MT;
   int rdb_flag = 0;
 
-  /*MT = MASS_POS_H;
-  printf("MASS_POS_H = %d\n",MASS_POS_H);
-  printf("        MT = %d\n",MT);
-  printf("Mass_Init_Flag = %d before mass_type_init()\n", Mass_Init_Flag);
-  printf("Mass[MASS_POS_H].madd = %9.6f\n",Mass[MASS_POS_H].madd);
-  printf("Mass[MT].madd = %9.6f\n",Mass[MT].madd);*/
   mass_type_init();
-  /*printf("Mass_Init_Flag = %d after mass_type_init()\n", Mass_Init_Flag);
-  printf("Mass[MASS_POS_H].madd = %9.6f\n",Mass[MASS_POS_H].madd);
-  printf("Mass[MT].madd = %9.6f\n",Mass[MT].madd);*/
 
-  printf("\ncalcmass by Maxim A. Dubinnyi\n", NI);
-  printf("Version 2024-03-01\n");
-  //printf("\nDatabase of %d known isotopes loaded:\n", NI);
-  //for(i=0;i<NI;i++)
-  //  printf("%s(%d)%s",Isotopes[i].name, Isotopes[i].imass, i==NI-1?"\n":", ");
+  printf("\ncalcmass by Maxim A. Dubinnyi\n");
+  printf("Version 2025-03-01\n");
 
-  if(argc<4){
-    printf(
-      "Too few arguments found (%d).\nUsage:\n"
-      "calcmass -mass [type] [Chemical formula] \n"
-      "calcmass -chem [type] [Chemical limits]  [mass]\n\n"
-      "[type] is one of M, M+, M-, MH+, MNa+, MCa+, MH-\n"
-      "[Chemical formula] is in the form C10,N6,O2,H13,Cl\n"
-      "[Chemical limits]  is in the form C8-10,N6,O1-2,H1-13,Cl\n",argc)
-      ;
-    exit(0);
+  if (argc < 4) {
+    print_usage(argc);
+    return 1;
   }
 
-  if(strcmp(argv[2],"M")==0)        MT=MASS_M;
-  else if(strcmp(argv[2],"MH+")==0) MT=MASS_POS_H;
-  else if(strcmp(argv[2],"M+")==0)  MT=MASS_POS;
-  else if(strcmp(argv[2],"M-")==0)  MT=MASS_NEG;
-  else if(strcmp(argv[2],"MNa+")==0)MT=MASS_POS_Na;
-  else if(strcmp(argv[2],"MK+")==0) MT=MASS_POS_K;
-  else if(strcmp(argv[2],"MCa+")==0)MT=MASS_POS_Ca;
-  else if(strcmp(argv[2],"MH-")==0) MT=MASS_NEG_H;
-  else if(strcmp(argv[2],"M2H++")==0) MT=MASS_POS_2H;
-  else if(strcmp(argv[2],"MH++")==0) MT=MASS_POS_2H;
-  else if(strcmp(argv[2],"MH2+")==0) MT=MASS_POS_2H;
-  else if(strcmp(argv[2],"MH+2")==0) MT=MASS_POS_2H;
-  else if(strcmp(argv[2],"MHNa++")==0) MT=MASS_POS_HNa;
-  else if(strcmp(argv[2],"M2Na++")==0) MT=MASS_POS_2Na;
-  else{
-    printf("Unknown mass type: \'%s\'. Exiting.\n",argv[2]);
-    return(-1);
+  if (strcmp(argv[2], "M") == 0)           MT = MASS_M;
+  else if (strcmp(argv[2], "MH+") == 0)    MT = MASS_POS_H;
+  else if (strcmp(argv[2], "M+") == 0)     MT = MASS_POS;
+  else if (strcmp(argv[2], "M-") == 0)     MT = MASS_NEG;
+  else if (strcmp(argv[2], "MNa+") == 0)   MT = MASS_POS_Na;
+  else if (strcmp(argv[2], "MK+") == 0)    MT = MASS_POS_K;
+  else if (strcmp(argv[2], "MCa+") == 0)   MT = MASS_POS_Ca;
+  else if (strcmp(argv[2], "MH-") == 0)    MT = MASS_NEG_H;
+  else if (strcmp(argv[2], "M2H++") == 0)  MT = MASS_POS_2H;
+  else if (strcmp(argv[2], "MH++") == 0)   MT = MASS_POS_2H;
+  else if (strcmp(argv[2], "MH2+") == 0)   MT = MASS_POS_2H;
+  else if (strcmp(argv[2], "MH+2") == 0)   MT = MASS_POS_2H;
+  else if (strcmp(argv[2], "MHNa++") == 0) MT = MASS_POS_HNa;
+  else if (strcmp(argv[2], "M2Na++") == 0) MT = MASS_POS_2Na;
+  else {
+    fprintf(stderr, "Unknown mass type: '%s'. Exiting.\n", argv[2]);
+    return 1;
   }
- 
-  //printf("        MT = %d\n",MT);
-  printf("Mass type is \'%s\' (%d), charge= %d, madd=%9.6f \n", 
-      Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
-  //printf("Mass[MT].charge = %d\n", Mass[MT].charge);
-  //printf("Mass[MT].madd = %9.6f\n", Mass[MT].madd);
 
-  if(strcmp(argv[1],"-mass")==0 || strcmp(argv[1],"--mass")==0){
-    Parse_Formula(argv[3],fi);
-    Print_Formula(fi,fs);
+  printf("Mass type is '%s' (%d), charge= %d, madd=%9.6f\n",
+         Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
+
+  if (strcmp(argv[1], "-mass") == 0 || strcmp(argv[1], "--mass") == 0) {
+    Parse_Formula(argv[3], fi);
+    Print_Formula(fi, fs, sizeof(fs));
     double rdb;
     Calc_RDB(fi, &rdb);
-    printf("\nParsed formula: \'%s\', RDB = %4.1f\n",fs, rdb);
-    mass=Print_Formula_Mass(fi,MT);
-    return(0);
-  }else if(strcmp(argv[1],"-chem")==0 || strcmp(argv[1],"--chem")==0 ||
-           strcmp(argv[1],"-chem-rdb")==0 || strcmp(argv[1],"--chem-rdb")==0
-      ){
-    if(strcmp(argv[1],"-chem-rdb")==0 || strcmp(argv[1],"--chem-rdb")==0 ){
+    printf("\nParsed formula: '%s', RDB = %4.1f\n", fs, rdb);
+    (void)Print_Formula_Mass(fi, MT);
+    return 0;
+  } else if (strcmp(argv[1], "-chem") == 0 || strcmp(argv[1], "--chem") == 0 ||
+             strcmp(argv[1], "-chem-rdb") == 0 || strcmp(argv[1], "--chem-rdb") == 0) {
+    if (strcmp(argv[1], "-chem-rdb") == 0 || strcmp(argv[1], "--chem-rdb") == 0) {
       /* skip negative and half-integer RDB values */
       rdb_flag = 1;
-    }else{
+    } else {
       rdb_flag = 0;
     }
-    Parse_Limits(argv[3],lim);
-    Print_Limits(lim,fs);
-    printf("\nParsed limits: \'%s\'\n",fs);
-    if(argc<5){
-      printf("Please enter the target mass\n");
-      return(-1);
-    }else{
-      double fm, *pfm=&fm;
-      /*printf("argv[4] is \'%s\'\n",argv[4]);*/
-      i=sscanf(argv[4],"%lf", pfm);
-      Target_Mass=fm;
-      printf("Target mass is %10.6f\n",Target_Mass);
+
+    Parse_Limits(argv[3], lim);
+    Print_Limits(lim, fs, sizeof(fs));
+    printf("\nParsed limits: '%s'\n", fs);
+
+    if (argc < 5) {
+      fprintf(stderr, "Please enter the target mass\n");
+      return 1;
     }
-    printf("RDB check flag is %d\n",rdb_flag);
-    int i=0,count=0;
+
+    char *endptr = NULL;
+    errno = 0;
+    Target_Mass = strtod(argv[4], &endptr);
+    if (errno != 0 || endptr == argv[4] || *endptr != '\0' ||
+        !isfinite(Target_Mass) || Target_Mass <= 0.0) {
+      fprintf(stderr, "Invalid target mass: '%s'\n", argv[4]);
+      return 1;
+    }
+    printf("Target mass is %10.6f\n", Target_Mass);
+    printf("RDB check flag is %d\n", rdb_flag);
+
+    int i = 0;
+    long count = 0;
     chem = CHEM_LIST;
-    int v_unambig;
-    double rdb;
-    for(
-        Loop_Init(pfi,plim); 
-        Loop_End (pfi,plim);
-        Loop_Next(pfi,plim)){
-      Loop_Copy(&(chem->f),pfi);
-      chem->mass          = Calc_Mass_Charge_Ratio(chem->f,MT);
+    for (Loop_Init(pfi, plim); Loop_End(pfi, plim); Loop_Next(pfi, plim)) {
+      Loop_Copy(&(chem->f), pfi);
+      chem->mass          = Calc_Mass_Charge_Ratio(chem->f, MT);
       chem->mass_diff     = chem->mass - Target_Mass;
-      chem->mass_diff_ppm = (chem->mass_diff)/Target_Mass*1000000.;
-      v_unambig = Calc_RDB(chem->f, &(chem->RDB));
-      rdb = chem->RDB;
-      if( (!rdb_flag) || 
-	  (rdb_flag && (rdb>=-0.01) && fabs(roundf(rdb)-rdb)<=0.01 ) ){
-         i++;chem++;count++;
+      chem->mass_diff_ppm = (chem->mass_diff) / Target_Mass * 1000000.0;
+      (void)Calc_RDB(chem->f, &(chem->RDB));
+      double rdb = chem->RDB;
+      if ((!rdb_flag) ||
+          (rdb_flag && (rdb >= -0.01) && fabs(round(rdb) - rdb) <= 0.01)) {
+        i++;
+        chem++;
+        count++;
       }
-      if(i>=N_Chem){
-        qsort(CHEM_LIST,N_Chem,sizeof(fmass_t),Mass_Diff);
-        i=N_Best;
-        chem=CHEM_LIST+i;
+      if (i >= N_Chem) {
+        qsort(CHEM_LIST, N_Chem, sizeof(fmass_t), Mass_Diff);
+        i = N_Best;
+        chem = CHEM_LIST + i;
       }
-      /*
-      Print_Formula(*pfi,fs);
-      printf("%15s: %10.6f  %10.6f\n",fs, mass, mass-Target_Mass);
-      */
     }
-    qsort(CHEM_LIST,i,sizeof(fmass_t),Mass_Diff);
-    int n_chem=i;
-    printf("Chemical formulas considered: %d\n",count);
 
-    int n_act=n_chem<N_Best?n_chem:N_Best;
-    
+    if (i > 1) {
+      qsort(CHEM_LIST, (size_t)i, sizeof(fmass_t), Mass_Diff);
+    }
+    int n_chem = i;
+    printf("Chemical formulas considered: %ld\n", count);
+
+    int n_act = n_chem < N_Best ? n_chem : N_Best;
+    if (n_act == 0) {
+      printf("No matching chemical formulas found.\n");
+      return 0;
+    }
+
     int n_print;
-    for(n_print=0;
-        n_print<n_act && 
-        fabs(CHEM_LIST[n_print].mass_diff)<=MAX_DIFF &&
-        fabs(CHEM_LIST[n_print].mass_diff_ppm)<=MAX_DIFF_PPM ;
-        n_print++){};
-   
-    if(n_print==0)n_print=1;
+    for (n_print = 0;
+         n_print < n_act &&
+         fabs(CHEM_LIST[n_print].mass_diff) <= MAX_DIFF &&
+         fabs(CHEM_LIST[n_print].mass_diff_ppm) <= MAX_DIFF_PPM;
+         n_print++) {
+    }
 
-    printf("Best %d formulas with mass differense less then %8.6f Da and %7.3f ppm",
-        n_print, MAX_DIFF, MAX_DIFF_PPM);
-    if(rdb_flag){
+    if (n_print == 0) n_print = 1;
+
+    printf("Best %d formulas with mass difference less than %8.6f Da and %7.3f ppm",
+           n_print, MAX_DIFF, MAX_DIFF_PPM);
+    if (rdb_flag) {
       printf(" and integer non-negative RDB values:\n");
-    }else{
+    } else {
       printf(":\n");
-    };
-    printf("%25s  %10s  %12s %11s  %4s\n","Formula", "Theory", "Mass diff", "Mass diff", "RDB");
-    for(i=0;i<n_print;i++){
-      Print_Formula(CHEM_LIST[i].f,fs);
-      printf("%25s: %7.6f  %8.3f mDa %7.3f ppm  %4.1f\n",fs, 
-          CHEM_LIST[i].mass, CHEM_LIST[i].mass_diff*1000.0, CHEM_LIST[i].mass_diff_ppm, CHEM_LIST[i].RDB);
     }
-    if (! rdb_flag){
-      printf("use --chem-rdb instead of --chem \nto ignore formulas with NEGATIVE or HALF-INTEGER RDB values\n");
+    printf("%25s  %10s  %12s %11s  %4s\n", "Formula", "Theory", "Mass diff", "Mass diff", "RDB");
+    for (int idx = 0; idx < n_print; idx++) {
+      Print_Formula(CHEM_LIST[idx].f, fs, sizeof(fs));
+      printf("%25s: %7.6f  %8.3f mDa %7.3f ppm  %4.1f\n", fs,
+             CHEM_LIST[idx].mass,
+             CHEM_LIST[idx].mass_diff * 1000.0,
+             CHEM_LIST[idx].mass_diff_ppm,
+             CHEM_LIST[idx].RDB);
     }
-    return(0);
-  }else{
-    printf("Unknown argument: %s", argv[1]);
-    return(-1);
-  };
-
-};
+    if (!rdb_flag) {
+      printf("use --chem-rdb instead of --chem\nto ignore formulas with NEGATIVE or HALF-INTEGER RDB values\n");
+    }
+    return 0;
+  } else {
+    fprintf(stderr, "Unknown argument: %s\n", argv[1]);
+    return 1;
+  }
+}
 
 double Print_Formula_Mass(formula_t fi, mass_t mt)
 {
-  int m,e;
+  int e;
+  double mass = 0.0;
+  double charge = Calc_Charge(fi, mt);
+
   printf("\nFormula:\n");
-  double mass=0.0, me;
-  double charge=0.0;
-  for(e=0;e<NI;e++){
-    me= Isotopes[e].dmass*fi[e];
-    mass+=me;
-    if(fi[e])
-      printf("%2s %2d %9.6f %11.6f\n", 
-        Isotopes[e].name, fi[e], Isotopes[e].dmass, me);
+  for (e = 0; e < NI; e++) {
+    double me = Isotopes[e].dmass * fi[e];
+    mass += me;
+    if (fi[e]) {
+      printf("%2s %2d %9.6f %11.6f\n",
+             Isotopes[e].name, fi[e], Isotopes[e].dmass, me);
+    }
   }
   printf("------------------------------\n");
-/*  for(m=0;m<NM;m++){*/
-  printf("    %10s: (M)   %11.6f\n",Mass[mt].name,Calc_Mass(fi,mt));
-  printf("    %10s: (M/Z) %11.6f\n",Mass[mt].name,Calc_Mass_Charge_Ratio(fi,mt));
-/*  }*/
-  return(mass);
-};
+  printf("    %10s: (M)   %11.6f\n", Mass[mt].name, Calc_Mass(fi, mt));
+  if (charge == 0.0) {
+    printf("    %10s: (M/Z) N/A (neutral)\n", Mass[mt].name);
+  } else {
+    printf("    %10s: (M/Z) %11.6f\n", Mass[mt].name, Calc_Mass_Charge_Ratio(fi, mt));
+  }
+  return mass;
+}
 
-void Print_Formula(formula_t fi, char* str)
+void Print_Formula(formula_t fi, char *str, size_t str_size)
 {
-   int e,n,flag=0;
-   char *s=str;
-   for(e=1;e<NI;e++){
-     if(fi[e]>=1 && flag){
-       n=sprintf(s,"%s",",");
-       if(n>0){s+=n;} else {*s=0;break;};
-     }
-     if(fi[e]>=1){
-       n=sprintf(s,"%s",Isotopes[e].name);
-       if(n>0){s+=n;} else {*s=0;break;};
-       flag=1;
-     }
-     if(fi[e]>=2){
-       n=sprintf(s,"%d",fi[e]);
-       if(n>0){s+=n;} else {*s=0;break;};
-     }
-   }
-   if(fi[0]>0){
-     n=sprintf(s,"%s","-");
-     if(n>0){s+=n;} else {*s=0;return;};
-   }
-   if(fi[0]<0){
-     n=sprintf(s,"%s","+");
-     if(n>0){s+=n;} else {*s=0;return;};
-   }
-   if(fi[0]<=-2 || fi[0]>=2){
-     n=sprintf(s,"%d",fi[0]*(fi[0]>0?1:-1));
-     if(n>0){s+=n;} else {*s=0;return;};
-   }
-};
+  int e, n, flag = 0;
+  char *s = str;
+  size_t rem = str_size;
 
-void Print_Limits(limits_t lim, char* str)
+  if (rem == 0) return;
+  *s = '\0';
+
+  for (e = 1; e < NI; e++) {
+    if (fi[e] >= 1 && flag) {
+      n = snprintf(s, rem, ",");
+      if (n < 0 || (size_t)n >= rem) return;
+      s += n;
+      rem -= (size_t)n;
+    }
+    if (fi[e] >= 1) {
+      n = snprintf(s, rem, "%s", Isotopes[e].name);
+      if (n < 0 || (size_t)n >= rem) return;
+      s += n;
+      rem -= (size_t)n;
+      flag = 1;
+    }
+    if (fi[e] >= 2) {
+      n = snprintf(s, rem, "%d", fi[e]);
+      if (n < 0 || (size_t)n >= rem) return;
+      s += n;
+      rem -= (size_t)n;
+    }
+  }
+  if (fi[0] > 0) {
+    n = snprintf(s, rem, "-");
+    if (n < 0 || (size_t)n >= rem) return;
+    s += n;
+    rem -= (size_t)n;
+  } else if (fi[0] < 0) {
+    n = snprintf(s, rem, "+");
+    if (n < 0 || (size_t)n >= rem) return;
+    s += n;
+    rem -= (size_t)n;
+  }
+  if (fi[0] <= -2 || fi[0] >= 2) {
+    n = snprintf(s, rem, "%d", fi[0] > 0 ? fi[0] : -fi[0]);
+    if (n < 0 || (size_t)n >= rem) return;
+  }
+}
+
+void Print_Limits(limits_t lim, char *str, size_t str_size)
 {
-   int e,n,flag=0;
-   char *s=str;
-   for(e=1;e<NI;e++){
-     if(lim[e].max && flag){
-       n=sprintf(s,"%s",",");
-       if(n>0){s+=n;} else {*s=0;break;};
-     }
-     if(lim[e].max){
-       n=sprintf(s,"%s",Isotopes[e].name);
-       if(n>0){s+=n;} else {*s=0;break;};
-       flag=1;
-       n=sprintf(s,"%d-",lim[e].min);
-       if(n>0){s+=n;} else {*s=0;break;};
-       n=sprintf(s,"%d",lim[e].max);
-       if(n>0){s+=n;} else {*s=0;break;};
-     }
-   }
-};
+  int e, n, flag = 0;
+  char *s = str;
+  size_t rem = str_size;
+
+  if (rem == 0) return;
+  *s = '\0';
+
+  for (e = 1; e < NI; e++) {
+    if (lim[e].max && flag) {
+      n = snprintf(s, rem, ",");
+      if (n < 0 || (size_t)n >= rem) return;
+      s += n;
+      rem -= (size_t)n;
+    }
+    if (lim[e].max) {
+      n = snprintf(s, rem, "%s%d-%d", Isotopes[e].name, lim[e].min, lim[e].max);
+      if (n < 0 || (size_t)n >= rem) return;
+      s += n;
+      rem -= (size_t)n;
+      flag = 1;
+    }
+  }
+}

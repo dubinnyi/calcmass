@@ -1,21 +1,24 @@
-SHELL=/bin/sh
+SHELL    = /bin/sh
 
-OBJS=calcmass.o isotopes.o parse.o multiloop.o
+OBJS     = calcmass.o isotopes.o parse.o multiloop.o
 
 CC       = gcc
-INCLIB   = 
-CPPFLAGS = 
-LDFLAGS  = -lm
-CFLAGS   = -O3 -g -DLINUX -D_NO_PROTO $(INCLIB)
+INCLIB   =
+CPPFLAGS =
+CFLAGS   = -std=c11 -O3 -g -Wall -Wextra -Wpedantic -Wshadow -DLINUX $(INCLIB)
+LDFLAGS  =
+LDLIBS   = -lm
 
-COMMAND=calcmass
+COMMAND  = calcmass
 
-$(COMMAND):  $(OBJS)
-	$(CC) $(LDFLAGS) -o $(COMMAND) $(OBJS) $(SYSLIB)
+$(COMMAND): $(OBJS)
+	$(CC) $(LDFLAGS) -o $(COMMAND) $(OBJS) $(LDLIBS) $(SYSLIB)
 
-$(OBJS):    isotopes.h
+$(OBJS): isotopes.h
 
 clean:
-	rm -f *.o *.l
+	rm -f $(COMMAND) *.o *.l
+
+.PHONY: clean
 
 
