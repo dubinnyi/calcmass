@@ -3,12 +3,15 @@
  * @brief CLI entry point and output formatting for the calcmass mass-spectrometry tool.
  *
  * Provides two primary command-line modes:
- * 1. `-mass` / `--mass <adduct> <formula>`
+ * 1. `-mass` / `--mass [-s|--s] <adduct> <formula>`
  *    Calculates monoisotopic mass, m/z ratio, elemental breakdown, and RDB for a formula.
- * 2. `-chem` / `--chem` / `-chem-rdb` / `--chem-rdb <adduct> <limits> <target_mass>`
+ * 2. `-chem` / `--chem` / `-chem-rdb` / `--chem-rdb [-s|--s] <adduct> <limits> <target_mass>`
  *    Enumerates candidate formulas within the given element bounds, retains the closest
  *    matches within `MAX_DIFF` (Da) and `MAX_DIFF_PPM` (ppm), and prints up to `N_Best`
  *    results sorted by absolute mass error.
+ *
+ * Passing `-s` or `--s` anywhere on the command line enables short output mode
+ * (only the M/Z line for `-mass`, or the results table starting from `Formula` for `-chem`).
  */
 
 #include <stdio.h>
@@ -45,9 +48,11 @@ static void print_usage(int argc)
 {
   printf(
     "Too few arguments found (%d).\nUsage:\n"
-    "calcmass -mass [type] [Chemical formula]\n"
-    "calcmass -chem [type] [Chemical limits] [mass]\n"
-    "calcmass --chem-rdb [type] [Chemical limits] [mass]\n\n"
+    "calcmass [-s|--s] -mass [type] [Chemical formula]\n"
+    "calcmass [-s|--s] -chem [type] [Chemical limits] [mass]\n"
+    "calcmass [-s|--s] --chem-rdb [type] [Chemical limits] [mass]\n\n"
+    "Options:\n"
+    "  -s, --s          Short output (M/Z line only for -mass; table only for -chem)\n\n"
     "[type] is one of M, M+, M-, MH+, MNa+, MK+, MCa+, MH-,\n"
     "                 M2H++ (MH++, MH2+, MH+2), MHNa++, M2Na++\n"
     "[Chemical formula] is in the form C10,N6,O2,H13,Cl or C10H13N6O2Cl\n"
@@ -57,13 +62,14 @@ static void print_usage(int argc)
 /**
  * @brief Program entry point: parses CLI arguments and dispatches `-mass` or `-chem` modes.
  *
- * Argument contract:
- * - `argv[1]`: Mode flag: `-mass`/`--mass`, `-chem`/`--chem`, or `-chem-rdb`/`--chem-rdb`.
- * - `argv[2]`: Ion/adduct name (e.g., `M`, `MH+`, `MNa+`, `M2H++`).
- * - `argv[3]`: Chemical formula (in `-mass` mode) or element limits (in `-chem` modes).
- * - `argv[4]`: Required in `-chem` modes; strictly positive finite target mass/m/z in Da.
+ * Recognizes optional `-s` / `--s` (short output) at any position in `argv`, leaving
+ * positional arguments:
+ * - `pos[0]`: Mode flag: `-mass`/`--mass`, `-chem`/`--chem`, or `-chem-rdb`/`--chem-rdb`.
+ * - `pos[1]`: Ion/adduct name (e.g., `M`, `MH+`, `MNa+`, `M2H++`).
+ * - `pos[2]`: Chemical formula (in `-mass` mode) or element limits (in `-chem` modes).
+ * - `pos[3]`: Required in `-chem` modes; strictly positive finite target mass/m/z in Da.
  *
- * @param[in] argc Number of command-line arguments (must be >= 4 for `-mass`, >= 5 for `-chem`).
+ * @param[in] argc Number of command-line arguments (at least 3 positional args for `-mass`, 4 for `-chem`).
  * @param[in] argv Array of NUL-terminated command-line argument strings.
  * @return `0` on success; `1` on invalid arguments, unknown mode/adduct, or invalid target mass.
  */
@@ -75,75 +81,103 @@ int main(int argc, char **argv)
   char fs[1024];
   mass_t MT;
   int rdb_flag = 0;
+  int short_flag = 0;
+  char *pos[8];
+  int npos = 0;
 
   mass_type_init();
 
-  printf("\ncalcmass by Maxim A. Dubinnyi\n");
-  printf("Version 2025-03-01\n");
+  for (int a = 1; a < argc; a++) {
+    if (strcmp(argv[a], "-s") == 0 || strcmp(argv[a], "--s") == 0) {
+      short_flag = 1;
+    } else if (npos < 8) {
+      pos[npos++] = argv[a];
+    }
+  }
 
-  if (argc < 4) {
+  if (!short_flag) {
+    printf("\ncalcmass by Maxim A. Dubinnyi\n");
+    printf("Version 2026-11-24\n");
+  }
+
+  if (npos < 3) {
     print_usage(argc);
     return 1;
   }
 
-  if (strcmp(argv[2], "M") == 0)           MT = MASS_M;
-  else if (strcmp(argv[2], "MH+") == 0)    MT = MASS_POS_H;
-  else if (strcmp(argv[2], "M+") == 0)     MT = MASS_POS;
-  else if (strcmp(argv[2], "M-") == 0)     MT = MASS_NEG;
-  else if (strcmp(argv[2], "MNa+") == 0)   MT = MASS_POS_Na;
-  else if (strcmp(argv[2], "MK+") == 0)    MT = MASS_POS_K;
-  else if (strcmp(argv[2], "MCa+") == 0)   MT = MASS_POS_Ca;
-  else if (strcmp(argv[2], "MH-") == 0)    MT = MASS_NEG_H;
-  else if (strcmp(argv[2], "M2H++") == 0)  MT = MASS_POS_2H;
-  else if (strcmp(argv[2], "MH++") == 0)   MT = MASS_POS_2H;
-  else if (strcmp(argv[2], "MH2+") == 0)   MT = MASS_POS_2H;
-  else if (strcmp(argv[2], "MH+2") == 0)   MT = MASS_POS_2H;
-  else if (strcmp(argv[2], "MHNa++") == 0) MT = MASS_POS_HNa;
-  else if (strcmp(argv[2], "M2Na++") == 0) MT = MASS_POS_2Na;
+  if (strcmp(pos[1], "M") == 0)           MT = MASS_M;
+  else if (strcmp(pos[1], "MH+") == 0)    MT = MASS_POS_H;
+  else if (strcmp(pos[1], "M+") == 0)     MT = MASS_POS;
+  else if (strcmp(pos[1], "M-") == 0)     MT = MASS_NEG;
+  else if (strcmp(pos[1], "MNa+") == 0)   MT = MASS_POS_Na;
+  else if (strcmp(pos[1], "MK+") == 0)    MT = MASS_POS_K;
+  else if (strcmp(pos[1], "MCa+") == 0)   MT = MASS_POS_Ca;
+  else if (strcmp(pos[1], "MH-") == 0)    MT = MASS_NEG_H;
+  else if (strcmp(pos[1], "M2H++") == 0)  MT = MASS_POS_2H;
+  else if (strcmp(pos[1], "MH++") == 0)   MT = MASS_POS_2H;
+  else if (strcmp(pos[1], "MH2+") == 0)   MT = MASS_POS_2H;
+  else if (strcmp(pos[1], "MH+2") == 0)   MT = MASS_POS_2H;
+  else if (strcmp(pos[1], "MHNa++") == 0) MT = MASS_POS_HNa;
+  else if (strcmp(pos[1], "M2Na++") == 0) MT = MASS_POS_2Na;
   else {
-    fprintf(stderr, "Unknown mass type: '%s'. Exiting.\n", argv[2]);
+    fprintf(stderr, "Unknown mass type: '%s'. Exiting.\n", pos[1]);
     return 1;
   }
 
-  printf("Mass type is '%s' (%d), charge= %d, madd=%9.6f\n",
-         Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
+  if (!short_flag) {
+    printf("Mass type is '%s' (%d), charge= %d, madd=%9.6f\n",
+           Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
+  }
 
-  if (strcmp(argv[1], "-mass") == 0 || strcmp(argv[1], "--mass") == 0) {
-    Parse_Formula(argv[3], fi);
+  if (strcmp(pos[0], "-mass") == 0 || strcmp(pos[0], "--mass") == 0) {
+    Parse_Formula(pos[2], fi);
+    if (short_flag) {
+      double charge = Calc_Charge(fi, MT);
+      if (charge == 0.0) {
+        printf("%s: (M)   %11.6f\n", Mass[MT].name, Calc_Mass(fi, MT));
+      } else {
+        printf("%s: (M/Z) %11.6f\n", Mass[MT].name, Calc_Mass_Charge_Ratio(fi, MT));
+      }
+      return 0;
+    }
     Print_Formula(fi, fs, sizeof(fs));
     double rdb;
     Calc_RDB(fi, &rdb);
     printf("\nParsed formula: '%s', RDB = %4.1f\n", fs, rdb);
     (void)Print_Formula_Mass(fi, MT);
     return 0;
-  } else if (strcmp(argv[1], "-chem") == 0 || strcmp(argv[1], "--chem") == 0 ||
-             strcmp(argv[1], "-chem-rdb") == 0 || strcmp(argv[1], "--chem-rdb") == 0) {
-    if (strcmp(argv[1], "-chem-rdb") == 0 || strcmp(argv[1], "--chem-rdb") == 0) {
+  } else if (strcmp(pos[0], "-chem") == 0 || strcmp(pos[0], "--chem") == 0 ||
+             strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
+    if (strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
       /* skip negative and half-integer RDB values */
       rdb_flag = 1;
     } else {
       rdb_flag = 0;
     }
 
-    Parse_Limits(argv[3], lim);
-    Print_Limits(lim, fs, sizeof(fs));
-    printf("\nParsed limits: '%s'\n", fs);
+    Parse_Limits(pos[2], lim);
+    if (!short_flag) {
+      Print_Limits(lim, fs, sizeof(fs));
+      printf("\nParsed limits: '%s'\n", fs);
+    }
 
-    if (argc < 5) {
+    if (npos < 4) {
       fprintf(stderr, "Please enter the target mass\n");
       return 1;
     }
 
     char *endptr = NULL;
     errno = 0;
-    Target_Mass = strtod(argv[4], &endptr);
-    if (errno != 0 || endptr == argv[4] || *endptr != '\0' ||
+    Target_Mass = strtod(pos[3], &endptr);
+    if (errno != 0 || endptr == pos[3] || *endptr != '\0' ||
         !isfinite(Target_Mass) || Target_Mass <= 0.0) {
-      fprintf(stderr, "Invalid target mass: '%s'\n", argv[4]);
+      fprintf(stderr, "Invalid target mass: '%s'\n", pos[3]);
       return 1;
     }
-    printf("Target mass is %10.6f\n", Target_Mass);
-    printf("RDB check flag is %d\n", rdb_flag);
+    if (!short_flag) {
+      printf("Target mass is %10.6f\n", Target_Mass);
+      printf("RDB check flag is %d\n", rdb_flag);
+    }
 
     int i = 0;
     long count = 0;
@@ -172,7 +206,9 @@ int main(int argc, char **argv)
       qsort(CHEM_LIST, (size_t)i, sizeof(fmass_t), Mass_Diff);
     }
     int n_chem = i;
-    printf("Chemical formulas considered: %ld\n", count);
+    if (!short_flag) {
+      printf("Chemical formulas considered: %ld\n", count);
+    }
 
     int n_act = n_chem < N_Best ? n_chem : N_Best;
     if (n_act == 0) {
@@ -190,12 +226,14 @@ int main(int argc, char **argv)
 
     if (n_print == 0) n_print = 1;
 
-    printf("Best %d formulas with mass difference less than %8.6f Da and %7.3f ppm",
-           n_print, MAX_DIFF, MAX_DIFF_PPM);
-    if (rdb_flag) {
-      printf(" and integer non-negative RDB values:\n");
-    } else {
-      printf(":\n");
+    if (!short_flag) {
+      printf("Best %d formulas with mass difference less than %8.6f Da and %7.3f ppm",
+             n_print, MAX_DIFF, MAX_DIFF_PPM);
+      if (rdb_flag) {
+        printf(" and integer non-negative RDB values:\n");
+      } else {
+        printf(":\n");
+      }
     }
     printf("%25s  %10s  %12s %11s  %4s\n", "Formula", "Theory", "Mass diff", "Mass diff", "RDB");
     for (int idx = 0; idx < n_print; idx++) {
@@ -206,12 +244,12 @@ int main(int argc, char **argv)
              CHEM_LIST[idx].mass_diff_ppm,
              CHEM_LIST[idx].RDB);
     }
-    if (!rdb_flag) {
+    if (!short_flag && !rdb_flag) {
       printf("use --chem-rdb instead of --chem\nto ignore formulas with NEGATIVE or HALF-INTEGER RDB values\n");
     }
     return 0;
   } else {
-    fprintf(stderr, "Unknown argument: %s\n", argv[1]);
+    fprintf(stderr, "Unknown argument: %s\n", pos[0]);
     return 1;
   }
 }
