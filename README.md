@@ -51,7 +51,11 @@ make clean      # Remove executables and object files
 
 - Short single-dash mode flags (`-mass`, `-chem`, `-chem-rdb`) are also accepted.
 - Options can be placed anywhere on the command line:
+  - `-h`, `--help` — show usage help and exit with status `0`.
   - `-s`, `--s` — suppress banners and metadata, printing only the *m/z* line (`--mass`) or the results table (`--chem`).
+  - `--ppm <val>` — maximum relative mass error in ppm for `--chem` / `--chem-rdb` (default: `20.0`).
+  - `--da <val>` — maximum absolute mass error in Da for `--chem` / `--chem-rdb` (default: `0.1`).
+  - `--top <n>` — maximum number of top-ranked formulas to display (default: `30`).
   - `--rdb-min <val>`, `--rdb-max <val>` — inclusive lower/upper bounds on **neutral-molecule RDB** (default lower bound for `--chem-rdb` is `0.0`).
   - `--rdb-strict` — apply RDB bounds strictly against the organic baseline (`S=2`, `P=3`) instead of accepting any valid valence in `[S=2..6, P=3..5]`.
 
@@ -102,7 +106,7 @@ This differs from vendor tools such as **Thermo Xcalibur** or **Waters MassLynx*
   > **Shell note:** Always enclose formulas containing parentheses in single quotes (e.g., `./calcmass --mass M '(CH3)2SO'`), since `(` and `)` are shell metacharacters in `bash`/`sh`/`zsh` and will trigger a shell syntax error if left unquoted.
 - **Limits**: `<Elem><min>-<max>` or fixed count `<Elem><n>` / `<Elem>` (implies `1`), e.g. `C0-30,H0-60,N0-5,O0-20` or `C8-10,N6,O1-2,H1-13,Cl`.
 - **Target mass (`<target_mass>`)**: accepts either a single positive number (`120.0427`) or an additive `+`/`-` expression (including Unicode minus `−` and en-dash `–`), e.g., `'362.1003 - 242.0576'` or `'242.0576 + 120.0427'` (quote expressions containing spaces in the shell).
-- **Search window**: prints up to the top 30 hits within `0.1 Da` and `20 ppm` of `<target_mass>` (or the single closest match if none fall within the window).
+- **Search window**: prints up to `--top` hits (default `30`) within `--da` (default `0.1 Da`) and `--ppm` (default `20 ppm`) of `<target_mass>` (or the single closest match if none fall within the window).
 
 ---
 
@@ -110,7 +114,7 @@ This differs from vendor tools such as **Thermo Xcalibur** or **Waters MassLynx*
 
 ### 1. Exact Mass Calculation for a Known Formula (`--mass`)
 
-Calculate the theoretical mass, *m/z*, elemental breakdown, and RDB of `C16H17N3O7` in negative mode (`MH-`):
+Calculate the theoretical mass, *m/z*, elemental breakdown, and RDB of the deazaflavin bioluminescence cofactor **ActH** (archaeal cofactor F0, 7,8-didemethyl-8-hydroxy-5-deazariboflavin, `C16H17N3O7`) [\[2\]](#references) in negative mode (`MH-`):
 
 ```bash
 ./calcmass --mass MH- C16H17N3O7
@@ -120,16 +124,16 @@ Full output:
 
 ```text
 calcmass by Maxim A. Dubinnyi
-Version 2026-11-26
+Version 2026-11-27
 Mass type is '[M-H]-' (4), charge= -1, madd=-1.007276
 
 Parsed formula: 'C16,H17,N3,O7', RDB = 10.0
 
 Formula:
- C 16 12.000000  192.000000
- H 17  1.007825   17.133026
- N  3 14.003074   42.009222
- O  7 15.994915  111.964402
+ C  16 12.000000  192.000000
+ H  17  1.007825   17.133026
+ N   3 14.003074   42.009222
+ O   7 15.994915  111.964402
 ------------------------------
         [M-H]-: (M)    362.099373
         [M-H]-: (M/Z)  362.099373
@@ -147,9 +151,9 @@ With `-s` / `--s` (short output):
 
 ---
 
-### 2. Formula Search Without RDB Filtering (`--chem -s`)
+### 2. Formula Search Without RDB Filtering (`--chem -s`) — Compound AsLn7 [\[1\]](#references)
 
-Suppose an ESI+ spectrum gives a molecular ion `[M+H]+` at *m/z* `324.1067`, and we search across `C0-30,H0-60,N0-5,O0-20`:
+In the structure elucidation of **Compound AsLn7** — a natural luciferin analogue from the bioluminescent Siberian earthworm *Fridericia heliota* consisting of the tyrosine-derived chromophore **CompX** conjugated with γ-aminobutyric acid (GABA) [\[1\]](#references) — ESI+ HRMS gives a protonated molecular ion `[M+H]+` at *m/z* `324.1067`. Searching across `C0-30,H0-60,N0-5,O0-20` without RDB filtering:
 
 ```bash
 ./calcmass -s --chem MH+ C0-30,H0-60,N0-5,O0-20 324.1067
@@ -173,13 +177,13 @@ Suppose an ESI+ spectrum gives a molecular ion `[M+H]+` at *m/z* `324.1067`, and
              C21,H13,N3,O: 324.113138     6.438 mDa  19.865 ppm  17.0
 ```
 
-Notice that the closest raw mass matches include chemically impossible compositions such as `H23,N2,O17` (RDB `-9.5`) and radical/odd-valence formulas like `C13,H15,N4,O6` (RDB `8.5`).
+Notice that the two closest raw mass matches are chemically impossible or odd-electron neutral compositions: `H23,N2,O17` (RDB `-9.5`) and `C13,H15,N4,O6` (RDB `8.5`).
 
 ---
 
-### 3. Filtering by Unsaturation / RDB (`--chem-rdb -s`)
+### 3. Filtering by Unsaturation / RDB (`--chem-rdb -s`) — Compound AsLn7 [\[1\]](#references)
 
-Running the same query with `--chem-rdb` discards negative and half-integer RDB entries, keeping only valid neutral closed-shell molecular formulas:
+Running the same query for **AsLn7** with `--chem-rdb` discards negative and half-integer neutral-molecule RDB values, leaving only valid closed-shell formulas:
 
 ```bash
 ./calcmass -s --chem-rdb MH+ C0-30,H0-60,N0-5,O0-20 324.1067
@@ -194,38 +198,42 @@ Running the same query with `--chem-rdb` discards negative and half-integer RDB 
              C21,H13,N3,O: 324.113138     6.438 mDa  19.865 ppm  17.0
 ```
 
-All nonsensical hits are eliminated, leaving only 5 chemically plausible formulas within 20 ppm (`C15,H17,N,O7` at +3.33 ppm, `C16,H13,N5,O3` at +7.45 ppm, `C10,H17,N3,O9` at −9.09 ppm, etc.).
+All nonsensical hits are eliminated, and the true formula of **AsLn7** — **`C15H17NO7`** (RDB `8.0`, +1.078 mDa / +3.33 ppm) — ranks #1 as the sole candidate within 5 ppm (verified with `--ppm 5`) [\[1\]](#references).
 
 ---
 
-### 4. Multi-Stage MS(*n*) Fragmentation Interpretation (ESI−)
+### 4. Multi-Stage MS(*n*) Fragmentation Interpretation — Deazaflavin Cofactor (ActH / ActS) [\[2\]](#references)
 
-When a single precursor *m/z* still admits several valid formulas, combining MS2, neutral loss, and MS3 measurements resolves the ambiguity.
+In the identification of the *Henlea* sp. bioluminescence activators **ActH** (deazaflavin cofactor F0, `C16H17N3O7`) and its novel 3′-O-sulfated derivative **ActS** (`C16H17N3O10S`) [\[2\]](#references), full-scan and MS2 masses alone admit multiple valid closed-shell formulas. Combining multi-stage MS(*n*) daughter ions and neutral losses resolves the ambiguity (data from [\[2\]](#references), Fig. 2 and ESI Tables S1–S2, Figs. S1–S3).
 
-#### Step A — MS2 precursor ion (`[M-H]-` = `362.1003`)
+#### Step A — ActS MS2 ion (`[M-H]-` = `362.10031`, ESI Table S2 of [\[2\]](#references))
+
+In ESI− mode, the ActS molecular ion `[M-H]-` at *m/z* `442.06003` yields a single MS2 daughter ion at *m/z* `362.10031` via neutral loss of `79.95972 Da` (`SO3`, exact `79.956815 Da`, −2.91 mDa / −36.3 ppm; preferred over `HPO3` at `79.966331 Da`, +6.61 mDa / +82.7 ppm, and confirmed by absence of ¹H–³¹P NMR splitting [\[2\]](#references)). Searching the `362.10031` ion (`ActH` core):
 
 ```bash
-./calcmass -s --chem-rdb MH- C10-30,H0-30,N0-8,O0-10 362.1003
+./calcmass -s --chem-rdb --ppm 15 MH- C5-30,H0-30,N0-10,O0-10 362.10031
 ```
 
 ```text
                   Formula      Theory     Mass diff   Mass diff   RDB
-            C17,H13,N7,O3: 362.100711     0.411 mDa   1.135 ppm  15.0
-            C16,H17,N3,O7: 362.099373    -0.927 mDa  -2.559 ppm  10.0
-                C28,H13,N: 362.097523    -2.777 mDa  -7.669 ppm  23.0
-             C21,H17,N,O5: 362.103396     3.096 mDa   8.551 ppm  14.0
-             C22,H13,N5,O: 362.104734     4.434 mDa  12.244 ppm  19.0
-            C11,H17,N5,O9: 362.095351    -4.949 mDa -13.668 ppm   6.0
-            C10,H17,N7,O8: 362.106584     6.284 mDa  17.355 ppm   6.0
-            C23,H13,N3,O2: 362.093500    -6.800 mDa -18.779 ppm  19.0
+            C17,H13,N7,O3: 362.100711     0.401 mDa   1.107 ppm  15.0
+            C16,H17,N3,O7: 362.099373    -0.937 mDa  -2.586 ppm  10.0
+            C5,H17,N9,O10: 362.102561     2.251 mDa   6.217 ppm   2.0
+                C28,H13,N: 362.097523    -2.787 mDa  -7.697 ppm  23.0
+             C21,H17,N,O5: 362.103396     3.086 mDa   8.523 ppm  14.0
+            C12,H13,N9,O5: 362.096688    -3.622 mDa -10.002 ppm  11.0
+             C22,H13,N5,O: 362.104734     4.424 mDa  12.217 ppm  19.0
+            C11,H17,N5,O9: 362.095351    -4.959 mDa -13.696 ppm   6.0
 ```
 
-#### Step B — Neutral loss (`M` = `362.1003 − 242.0576` = `120.0427`)
+At MS2 alone, `C17H13N7O3` (+1.11 ppm) actually lies closer to `362.10031` than `C16H17N3O7` (−2.59 ppm).
 
-Using adduct type `M` (neutral molecule) with inline mass subtraction identifies candidate neutral losses directly:
+#### Step B — Neutral loss (`M` = `362.10031 − 242.05761` = `120.04270`) and MS3 fragment (`242.05761`)
+
+Using adduct type `M` with inline mass subtraction identifies the neutral loss, while `MH-` identifies the MS3 fragment ion:
 
 ```bash
-./calcmass -s --chem-rdb M C0-10,H0-20,N0-6,O0-8 '362.1003 - 242.0576'
+./calcmass -s --chem-rdb M C0-10,H0-20,N0-6,O0-8 '362.10031 - 242.05761'
 ```
 
 ```text
@@ -234,32 +242,77 @@ Using adduct type `M` (neutral molecule) with inline mass subtraction identifies
                  C5,H4,N4: 120.043596     0.896 mDa   7.465 ppm   6.0
 ```
 
-#### Step C — MS3 fragment ion (`[M-H]-` = `242.0576`)
-
 ```bash
-./calcmass -s --chem-rdb MH- C0-20,H0-20,N0-6,O0-6 242.0576
+./calcmass -s --chem-rdb MH- C0-20,H0-20,N0-10,O0-6 242.05761
 ```
 
 ```text
                   Formula      Theory     Mass diff   Mass diff   RDB
-             C12,H9,N3,O3: 242.057115    -0.485 mDa  -2.005 ppm  10.0
-               C17,H9,N,O: 242.061137     3.537 mDa  14.614 ppm  14.0
-              C7,H9,N5,O5: 242.053092    -4.508 mDa -18.624 ppm   6.0
+             C12,H9,N3,O3: 242.057115    -0.495 mDa  -2.046 ppm  10.0
+               C,H9,N9,O6: 242.060303     2.693 mDa  11.124 ppm   2.0
+               C8,H5,N9,O: 242.054429    -3.181 mDa -13.140 ppm  11.0
+               C17,H9,N,O: 242.061137     3.527 mDa  14.573 ppm  14.0
+              C7,H9,N5,O5: 242.053092    -4.518 mDa -18.665 ppm   6.0
 ```
 
-Combining the MS3 fragment (`C12H9N3O3`, −2.01 ppm) and neutral loss (`C4H8O4`, −3.68 ppm) gives **`C16H17N3O7`** (`C12H9N3O3 + C4H8O4 = C16H17N3O7`), uniquely confirming the precursor formula (consistent with the additional observed `H2O` loss to `344.0895` and `C5H10O4` loss to `228.0420`).
+#### Step C — Ribityl neutral loss (`M` = `362.10031 − 228.04200` = `134.05831`) and aromatic core (`228.04200`)
+
+```bash
+./calcmass -s --chem-rdb M C0-10,H0-20,N0-6,O0-8 '362.10031 - 228.04200'
+```
+
+```text
+                  Formula      Theory     Mass diff   Mass diff   RDB
+                C5,H10,O4: 134.057909    -0.401 mDa  -2.993 ppm   1.0
+                 C6,H6,N4: 134.059246     0.936 mDa   6.984 ppm   6.0
+```
+
+```bash
+./calcmass -s --chem-rdb MH- C0-20,H0-20,N0-10,O0-6 228.04200
+```
+
+```text
+                  Formula      Theory     Mass diff   Mass diff   RDB
+             C11,H7,N3,O3: 228.041465    -0.535 mDa  -2.348 ppm  10.0
+                 H7,N9,O6: 228.044653     2.653 mDa  11.632 ppm   2.0
+               C7,H3,N9,O: 228.038779    -3.221 mDa -14.123 ppm  11.0
+               C16,H7,N,O: 228.045487     3.487 mDa  15.293 ppm  14.0
+              C6,H7,N5,O5: 228.037442    -4.558 mDa -19.988 ppm   6.0
+```
+
+Although `C17H13N7O3` had a smaller MS2 mass error (+1.11 ppm), matching it to the MS3 daughters (`C12H9N3O3`, `C11H7N3O3`) requires `C5H4N4` (+7.47 ppm) and `C6H6N4` (+6.98 ppm) neutral losses — exceeding the 5 ppm threshold. **`C16H17N3O7`** (`C12H9N3O3 + C4H8O4 = C11H7N3O3 + C5H10O4 = C16H17N3O7`, also consistent with the `H2O` loss `362.10031 → 344.08948`) is the **only** formula for which the parent ion, all neutral losses, and all MS3 daughter ions simultaneously agree within 5 ppm (for ActH itself in ESI−, Full MS `362.09832` gives the same unique self-consistent solution; see Table S1 of [\[2\]](#references)).
+
+#### Step D — Positive-mode MS4 unambiguous anchor (`[M+H]+` = `132.04555`, Fig. S1 of [\[2\]](#references))
+
+In ESI+ mode, following the deepest fragmentation path `364.12003 → 230.05746 → 187.05197 → 132.04555` reaches a low-mass MS4 fragment with a **single unambiguous formula** across `C0-20,H0-40,N0-10,O0-20`:
+
+```bash
+./calcmass -s --chem-rdb MH+ C0-20,H0-40,N0-10,O0-20 132.04555
+```
+
+```text
+                  Formula      Theory     Mass diff   Mass diff   RDB
+                C8,H5,N,O: 132.044390    -1.160 mDa  -8.783 ppm   7.0
+```
+
+Tracing back to the root (`C8H5NO → C10H6N2O2 → C11H7N3O3 → C16H17N3O7`) independently confirms **ActH** = `C16H17N3O7` and **ActS** = `C16H17N3O10S` (`ActH + SO3`) [\[2\]](#references).
 
 ---
 
 ## Project Structure
 
-- `calcmass.c` — CLI entry point, RDB filtering, candidate ranking, and formatted output.
+- `calcmass.c` — CLI entry point, threshold/RDB filtering, candidate ranking, and formatted output.
 - `isotopes.h` / `isotopes.c` — Element table (AME2020/CODATA 2022 masses and valence ranges), adduct definitions, mass/*m/z*/RDB calculators, and sort comparator.
-- `parse.c` — Strict chemical formula (including nested parentheses) and elemental range parsers.
+- `parse.c` — Strict chemical formula (including nested parentheses), elemental range, and target-mass expression parsers.
 - `multiloop.c` — Multi-dimensional iterator over elemental search limits.
 - `tests/test_unit.c`, `tests/test_cli.sh` — C unit tests and CLI integration test suite.
 - `Makefile` — Build, test, sanitizer, and install configuration (`gcc`/`clang`, C11, strict warnings).
 - `IsotopeMassTable.txt`, `Isotope_Table_NIST.txt` — Reference isotope mass tables.
+
+## References
+
+1. Dubinnyi MA, Tsarkova AS, Petushkov VN, *et al.* (2015) Novel Peptide Chemistry in Terrestrial Animals: Natural Luciferin Analogues from the Bioluminescent Earthworm *Fridericia heliota*. *Chem. Eur. J.* **21**:3942–3947. https://doi.org/10.1002/chem.201406498
+2. Petushkov VN, Vavilov MV, Ivanov IA, *et al.* (2023) Deazaflavin cofactor boosts earthworms *Henlea* bioluminescence. *Org. Biomol. Chem.* **21**:415–427. https://doi.org/10.1039/D2OB01946A
 
 ## Author
 

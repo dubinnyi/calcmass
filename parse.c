@@ -302,10 +302,25 @@ int Parse_Formula(const char *fc, formula_t fi)
   const char *cursor = fc;
   int parsed_any = 0;
   if (parse_formula_group(&cursor, fi, 0, &parsed_any) != 0) {
+    for (int e = 0; e <= NI; e++) fi[e] = 0;
     return -1;
   }
   if (!parsed_any) {
     fprintf(stderr, "Empty chemical formula\n");
+    for (int e = 0; e <= NI; e++) fi[e] = 0;
+    return -1;
+  }
+
+  int has_atoms = 0;
+  for (int e = 1; e < NI; e++) {
+    if (fi[e] > 0) {
+      has_atoms = 1;
+      break;
+    }
+  }
+  if (!has_atoms) {
+    fprintf(stderr, "Chemical formula must contain at least one atom\n");
+    for (int e = 0; e <= NI; e++) fi[e] = 0;
     return -1;
   }
   return 0;
@@ -354,25 +369,25 @@ int Parse_Limits(const char *fc, limits_t lim)
 
     if (!isalpha((unsigned char)*fc)) {
       fprintf(stderr, "Unexpected character '%c' in limits\n", *fc);
-      return -1;
+      goto fail;
     }
 
     char elem[16];
     int E = parse_element(&fc, elem, sizeof(elem));
     if (E == -1) {
       fprintf(stderr, "Unknown element: '%s'\n", elem);
-      return -1;
+      goto fail;
     }
 
     if (*fc == '-') {
       fprintf(stderr, "Missing lower limit before '-' for element '%s'\n", elem);
-      return -1;
+      goto fail;
     }
 
     int low = 1;
     if (parse_uint_checked(&fc, 1, &low) != 0) {
       fprintf(stderr, "Integer overflow in lower limit for element '%s'\n", elem);
-      return -1;
+      goto fail;
     }
     IFDEBUG printf("Element lower limit is %d\n", low);
 
@@ -381,15 +396,15 @@ int Parse_Limits(const char *fc, limits_t lim)
       fc++;
       if (!isdigit((unsigned char)*fc)) {
         fprintf(stderr, "Missing upper limit after '-' for element '%s'\n", elem);
-        return -1;
+        goto fail;
       }
       if (parse_uint_checked(&fc, 0, &high) != 0) {
         fprintf(stderr, "Integer overflow in upper limit for element '%s'\n", elem);
-        return -1;
+        goto fail;
       }
       if (*fc == '-') {
         fprintf(stderr, "Unexpected '-' in limits for element '%s'\n", elem);
-        return -1;
+        goto fail;
       }
     }
     IFDEBUG printf("Element upper limit is %d\n", high);
@@ -408,9 +423,16 @@ int Parse_Limits(const char *fc, limits_t lim)
 
   if (!parsed_any) {
     fprintf(stderr, "Empty element limits\n");
-    return -1;
+    goto fail;
   }
   return 0;
+
+fail:
+  for (int e = 0; e <= NI; e++) {
+    lim[e].min = 0;
+    lim[e].max = 0;
+  }
+  return -1;
 }
 
 /**

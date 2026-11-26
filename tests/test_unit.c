@@ -3,16 +3,42 @@
  * @brief Unit tests for calcmass core modules (isotopes.c, parse.c, multiloop.c).
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <limits.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "../isotopes.h"
 
 static int g_pass = 0;
 static int g_fail = 0;
+
+/* Temporarily suppress expected parser diagnostic messages on stderr during negative tests. */
+static int silence_stderr_begin(void)
+{
+  fflush(stderr);
+  int saved = dup(STDERR_FILENO);
+  if (saved < 0) return -1;
+  int devnull = open("/dev/null", O_WRONLY);
+  if (devnull >= 0) {
+    (void)dup2(devnull, STDERR_FILENO);
+    close(devnull);
+  }
+  return saved;
+}
+
+static void silence_stderr_end(int saved)
+{
+  if (saved < 0) return;
+  fflush(stderr);
+  (void)dup2(saved, STDERR_FILENO);
+  close(saved);
+}
 
 #define ASSERT_TRUE(expr) do { \
   if (expr) { \
@@ -193,20 +219,46 @@ static void test_parsers(void)
   ASSERT_EQ_INT(fi[2], 13);
   ASSERT_EQ_INT(fi[12], 1);
 
-  /* Formula negative cases (redirect stderr? messages are benign or suppressed) */
-  ASSERT_EQ_INT(Parse_Formula(NULL, fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("  ,  ", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("C10Si", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("Foo", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("Ca(OH2", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("CaOH)2", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("Ca()2", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("10CH4", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("C10@H14", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("C99999999999999", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("C2000000000C2000000000", fi), -1);
-  ASSERT_EQ_INT(Parse_Formula("(C1000000)1000000", fi), -1);
+  /* Formula negative cases (suppress expected stderr diagnostics) */
+  int saved_err = silence_stderr_begin();
+  int r_null = Parse_Formula(NULL, fi);
+  int r_empty = Parse_Formula("", fi);
+  int r_ws = Parse_Formula("  ,  ", fi);
+  int r_si = Parse_Formula("C10Si", fi);
+  int fi_c_after_err = fi[1];
+  int r_foo = Parse_Formula("Foo", fi);
+  int r_unclosed = Parse_Formula("Ca(OH2", fi);
+  int r_unmatched = Parse_Formula("CaOH)2", fi);
+  int r_emptyparen = Parse_Formula("Ca()2", fi);
+  int r_leadnum = Parse_Formula("10CH4", fi);
+  int r_badchar = Parse_Formula("C10@H14", fi);
+  int r_ovf1 = Parse_Formula("C99999999999999", fi);
+  int r_ovf2 = Parse_Formula("C2000000000C2000000000", fi);
+  int r_ovf3 = Parse_Formula("(C1000000)1000000", fi);
+  int r_plusonly = Parse_Formula("+", fi);
+  int r_minusonly = Parse_Formula("-2", fi);
+  int r_zeroatoms = Parse_Formula("C0", fi);
+  int r_zeromult = Parse_Formula("(OH)0", fi);
+  silence_stderr_end(saved_err);
+
+  ASSERT_EQ_INT(r_null, -1);
+  ASSERT_EQ_INT(r_empty, -1);
+  ASSERT_EQ_INT(r_ws, -1);
+  ASSERT_EQ_INT(r_si, -1);
+  ASSERT_EQ_INT(fi_c_after_err, 0); /* zeroed on parse failure */
+  ASSERT_EQ_INT(r_foo, -1);
+  ASSERT_EQ_INT(r_unclosed, -1);
+  ASSERT_EQ_INT(r_unmatched, -1);
+  ASSERT_EQ_INT(r_emptyparen, -1);
+  ASSERT_EQ_INT(r_leadnum, -1);
+  ASSERT_EQ_INT(r_badchar, -1);
+  ASSERT_EQ_INT(r_ovf1, -1);
+  ASSERT_EQ_INT(r_ovf2, -1);
+  ASSERT_EQ_INT(r_ovf3, -1);
+  ASSERT_EQ_INT(r_plusonly, -1);
+  ASSERT_EQ_INT(r_minusonly, -1);
+  ASSERT_EQ_INT(r_zeroatoms, -1);
+  ASSERT_EQ_INT(r_zeromult, -1);
 
   /* Limits positive cases */
   ASSERT_EQ_INT(Parse_Limits("C8-10,N6,O1-2,H1-13,Cl", lim), 0);
@@ -222,14 +274,27 @@ static void test_parsers(void)
   ASSERT_EQ_INT(lim[1].max, 10);
 
   /* Limits negative cases */
-  ASSERT_EQ_INT(Parse_Limits(NULL, lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("", lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("Si0-2", lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("C-10", lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("C8-", lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("C8-10-12", lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("10-20", lim), -1);
-  ASSERT_EQ_INT(Parse_Limits("C0-999999999999999", lim), -1);
+  saved_err = silence_stderr_begin();
+  int rl_null = Parse_Limits(NULL, lim);
+  int rl_empty = Parse_Limits("", lim);
+  int rl_si = Parse_Limits("C1-5,Si0-2", lim);
+  int lim_c_after_err = lim[1].max;
+  int rl_nolow = Parse_Limits("C-10", lim);
+  int rl_nohigh = Parse_Limits("C8-", lim);
+  int rl_twohyph = Parse_Limits("C8-10-12", lim);
+  int rl_num = Parse_Limits("10-20", lim);
+  int rl_ovf = Parse_Limits("C0-999999999999999", lim);
+  silence_stderr_end(saved_err);
+
+  ASSERT_EQ_INT(rl_null, -1);
+  ASSERT_EQ_INT(rl_empty, -1);
+  ASSERT_EQ_INT(rl_si, -1);
+  ASSERT_EQ_INT(lim_c_after_err, 0); /* zeroed on parse failure */
+  ASSERT_EQ_INT(rl_nolow, -1);
+  ASSERT_EQ_INT(rl_nohigh, -1);
+  ASSERT_EQ_INT(rl_twohyph, -1);
+  ASSERT_EQ_INT(rl_num, -1);
+  ASSERT_EQ_INT(rl_ovf, -1);
 
   /* Target mass arithmetic expression parser */
   double mval = 0.0;
@@ -293,19 +358,35 @@ static void test_multiloop_and_comparator(void)
   /* 3 * 3 * 2 = 18 combinations */
   ASSERT_EQ_INT(visited, 18);
 
-  /* Strict weak ordering of Mass_Diff */
-  fmass_t a, b, c;
+  /* INT_MAX boundary in multiloop must terminate cleanly without signed overflow */
+  memset(&lim, 0, sizeof(lim));
+  lim[1].min = INT_MAX - 1;
+  lim[1].max = INT_MAX;
+  visited = 0;
+  for (Loop_Init(&fi, &lim); Loop_End(&fi, &lim); Loop_Next(&fi, &lim)) {
+    ASSERT_TRUE(fi[1] == INT_MAX - 1 || fi[1] == INT_MAX);
+    visited++;
+  }
+  ASSERT_EQ_INT(visited, 2);
+
+  /* Strict weak ordering and deterministic tie-breaking of Mass_Diff */
+  fmass_t a, b, c, d;
   memset(&a, 0, sizeof(a));
   memset(&b, 0, sizeof(b));
   memset(&c, 0, sizeof(c));
+  memset(&d, 0, sizeof(d));
   a.mass_diff = -0.001;
   b.mass_diff =  0.002;
   c.mass_diff =  0.001;
+  d.mass_diff =  0.001;
+  d.f[1] = 5;
 
   ASSERT_EQ_INT(Mass_Diff(&a, &b), -1);
   ASSERT_EQ_INT(Mass_Diff(&b, &a),  1);
   ASSERT_EQ_INT(Mass_Diff(&a, &c),  0);
   ASSERT_EQ_INT(Mass_Diff(&a, &a),  0);
+  ASSERT_EQ_INT(Mass_Diff(&a, &d), -1);
+  ASSERT_EQ_INT(Mass_Diff(&d, &a),  1);
 }
 
 int main(void)

@@ -11,6 +11,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include "isotopes.h"
 
@@ -135,7 +136,6 @@ int Calc_RDB_Range(formula_t fi, double *rdb_min, double *rdb_max)
   int unambig_flag = True;
   int e;
 
-  if (!Mass_Init_Flag) mass_type_init();
   /* Start at e = 1 to skip electrons (index 0) */
   for (e = 1; e < NI; e++) {
     if (fi[e] != 0) {
@@ -210,21 +210,27 @@ double Calc_Mass_Charge_Ratio(formula_t fi, mass_t M)
 /**
  * @brief Standard `qsort` comparator for `fmass_t` entries by absolute mass error.
  *
- * Establishes a strict weak ordering on `fabs(mass_diff)` so the closest
- * theoretical formulas to the target mass sort first.
+ * Establishes a deterministic strict weak ordering on `fabs(mass_diff)` so the
+ * closest theoretical formulas to the target mass sort first, with lexicographical
+ * tie-breaking on the formula composition vector when two distinct formulas have
+ * identical `|mass_diff|`.
  *
  * @param[in] fm1 Pointer to the first `fmass_t` element; must be non-NULL.
  * @param[in] fm2 Pointer to the second `fmass_t` element; must be non-NULL.
- * @return `-1` if `|fm1->mass_diff| < |fm2->mass_diff|`,
- *         `+1` if `|fm1->mass_diff| > |fm2->mass_diff|`,
- *          `0` if equal.
+ * @return `-1` if `fm1` sorts before `fm2`, `+1` if after, `0` if equal.
  */
 int Mass_Diff(const void *fm1, const void *fm2)
 {
-  double d1 = fabs(((const fmass_t *)fm1)->mass_diff);
-  double d2 = fabs(((const fmass_t *)fm2)->mass_diff);
+  const fmass_t *a = (const fmass_t *)fm1;
+  const fmass_t *b = (const fmass_t *)fm2;
+  double d1 = fabs(a->mass_diff);
+  double d2 = fabs(b->mass_diff);
 
   if (d1 < d2) return -1;
   if (d1 > d2) return 1;
+
+  int cmp = memcmp(a->f, b->f, sizeof(formula_t));
+  if (cmp < 0) return -1;
+  if (cmp > 0) return 1;
   return 0;
 }

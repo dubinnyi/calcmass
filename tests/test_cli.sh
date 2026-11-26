@@ -119,11 +119,45 @@ assert_ok_contains "target mass Unicode minus subtraction" \
 assert_ok_contains "target mass addition" \
   "C16,H17,N3,O7" -s --chem-rdb MH- C10-30,H0-30,N0-8,O0-10 "242.0576 + 120.0427"
 
-# --- 4. Negative / error handling tests ---
+# --- 4. Threshold flags (--ppm, --da, --top) and --help ---
+assert_ok_contains "--help exits 0 with usage" \
+  "--ppm <val>" --help
+assert_ok_contains "-h exits 0 with usage" \
+  "--top <n>" -h
+assert_ok_contains "--ppm 5 keeps 3.33 ppm hit" \
+  "C15,H17,N,O7" -s --chem-rdb --ppm 5 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_not_contains "--ppm 5 excludes 7.45 ppm hit" \
+  "C16,H13,N5,O3" -s --chem-rdb --ppm 5 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_contains "--da 0.002 keeps 1.078 mDa hit" \
+  "C15,H17,N,O7" -s --chem-rdb --da 0.002 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_not_contains "--da 0.002 excludes 2.416 mDa hit" \
+  "C16,H13,N5,O3" -s --chem-rdb --da 0.002 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_contains "--top 2 keeps 2nd hit" \
+  "C16,H13,N5,O3" -s --chem-rdb --top 2 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_not_contains "--top 2 omits 3rd hit" \
+  "C10,H17,N3,O9" -s --chem-rdb --top 2 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_contains "--top 40 works beyond default 30" \
+  "Best 35 formulas" --chem --ppm 50 --top 40 MH+ C0-30,H0-60,N0-5,O0-20 324.1067
+assert_ok_contains "honest fallback when outside tolerance" \
+  "closest match:" --chem-rdb --ppm 1 M C1-2 500.0
+assert_ok_not_contains "no misleading 'less than' when outside tolerance" \
+  "less than" --chem-rdb --ppm 1 M C1-2 500.0
+assert_ok_contains "extreme INT_MIN electron count formatted safely" \
+  "+2147483648" --mass M C+2147483647+
+
+# --- 5. Negative / error handling tests ---
 assert_err_contains "too few args"             "Too few arguments" --mass M
 assert_err_contains "unknown adduct"           "Unknown mass type" --mass MLi+ H2O
 assert_err_contains "unknown mode"             "Unknown argument"  --foo M H2O
+assert_err_contains "unknown opt before mode"  "Unknown argument"  --foo --mass M H2O
+assert_err_contains "search opt in -mass"      "only valid in -chem" --ppm 5 --mass M H2O
+assert_err_contains "rdb opt in -mass"         "only valid in -chem" --rdb-min 0 --mass M H2O
+assert_err_contains "invalid --ppm 0"          "Invalid --ppm"     --chem --ppm 0 M C1-2 12.0
+assert_err_contains "invalid --da -1"          "Invalid --da"      --chem --da -1 M C1-2 12.0
+assert_err_contains "invalid --top 0"          "Invalid --top"     --chem --top 0 M C1-2 12.0
 assert_err_contains "unknown element formula"  "Unknown element"   --mass M C10Si
+assert_err_contains "charge-only formula"      "at least one atom" --mass M "+"
+assert_err_contains "zero-atom formula"        "at least one atom" --mass M C0
 assert_err_contains "unclosed paren"           "Unclosed '('"      --mass M "Ca(OH2"
 assert_err_contains "malformed limits C-10"    "Missing lower limit" --chem MH+ C-10 100.0
 assert_err_contains "malformed limits C8-"     "Missing upper limit" --chem MH+ C8- 100.0

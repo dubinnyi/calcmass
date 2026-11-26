@@ -3,15 +3,22 @@
  * @brief CLI entry point and output formatting for the calcmass mass-spectrometry tool.
  *
  * Provides two primary command-line modes:
- * 1. `-mass` / `--mass [-s|--s] <adduct> <formula>`
- *    Calculates monoisotopic mass, m/z ratio, elemental breakdown, and RDB for a formula.
- * 2. `-chem` / `--chem` / `-chem-rdb` / `--chem-rdb [-s|--s] <adduct> <limits> <target_mass>`
- *    Enumerates candidate formulas within the given element bounds, retains the closest
- *    matches within `MAX_DIFF` (Da) and `MAX_DIFF_PPM` (ppm), and prints up to `N_Best`
- *    results sorted by absolute mass error.
+ * 1. `[options] -mass | --mass <adduct> <formula>`
+ *    Calculates monoisotopic mass, m/z ratio, elemental breakdown, and RDB range for a formula.
+ * 2. `[options] -chem | --chem | -chem-rdb | --chem-rdb <adduct> <limits> <target_mass>`
+ *    Enumerates candidate formulas within the given element bounds, filters by optional
+ *    neutral-molecule RDB constraints, retains the closest matches within `--da` (Da)
+ *    and `--ppm` (ppm), and prints up to `--top` results sorted by absolute mass error.
  *
- * Passing `-s` or `--s` anywhere on the command line enables short output mode
- * (only the M/Z line for `-mass`, or the results table starting from `Formula` for `-chem`).
+ * Supported options (accepted at any position on the command line):
+ * - `-h`, `--help`       : Show usage help and exit with status 0.
+ * - `-s`, `--s`          : Short output (M/Z line for `-mass`; results table only for `-chem`).
+ * - `--ppm <val>`        : Maximum relative mass error in ppm (default: 20.0).
+ * - `--da <val>`         : Maximum absolute mass error in Da (default: 0.1).
+ * - `--top <n>`          : Maximum number of top-ranked hits to display (default: 30).
+ * - `--rdb-min <val>`    : Minimum neutral-molecule RDB (default: 0.0 for `--chem-rdb`).
+ * - `--rdb-max <val>`    : Maximum neutral-molecule RDB.
+ * - `--rdb-strict`       : Apply RDB bounds strictly to organic baseline (S=2, P=3).
  */
 
 #include <stdio.h>
@@ -20,6 +27,7 @@
 #include <string.h>
 #include <math.h>
 #include <errno.h>
+#include <limits.h>
 
 #include "isotopes.h"
 
@@ -27,17 +35,16 @@ double Print_Formula_Mass(formula_t fi, mass_t mt);
 void Print_Formula(formula_t fi, char *str, size_t str_size);
 void Print_Limits(limits_t lim, char *str, size_t str_size);
 
-/** @brief Maximum number of top-ranked candidate formulas retained and displayed. */
-#define N_Best 30
-/** @brief Maximum absolute mass difference (Da) for printing search hits. */
-#define MAX_DIFF 0.1
-/** @brief Maximum relative mass difference (ppm) for printing search hits. */
-#define MAX_DIFF_PPM 20.0
-/** @brief Capacity of the working candidate buffer flushed via qsort down to N_Best. */
-#define N_Chem 512
-
-static fmass_t CHEM_LIST[N_Chem];
-static fmass_t *chem = CHEM_LIST;
+/** @brief Default maximum number of top-ranked candidate formulas displayed. */
+#define DEFAULT_N_BEST 30
+/** @brief Upper sanity cap on `--top` to avoid excessive memory allocation. */
+#define MAX_N_BEST 1000000
+/** @brief Default maximum absolute mass difference (Da) for printing search hits. */
+#define DEFAULT_MAX_DIFF 0.1
+/** @brief Default maximum relative mass difference (ppm) for printing search hits. */
+#define DEFAULT_MAX_DIFF_PPM 20.0
+/** @brief Extra working buffer slots accumulated before compacting via qsort. */
+#define CHEM_BATCH_SIZE 512
 
 /** @brief RDB filter configuration applied during candidate enumeration. */
 typedef struct {
@@ -65,6 +72,29 @@ static int parse_double_arg(const char *s, double *out)
     return -1;
   }
   *out = val;
+  return 0;
+}
+
+/**
+ * @brief Parse a strictly positive integer within `[1, max_val]` from a CLI argument string.
+ *
+ * @param[in]  s       NUL-terminated string to parse.
+ * @param[in]  max_val Maximum permitted value.
+ * @param[out] out     Destination for the parsed integer.
+ * @return `0` on success; `-1` if malformed, non-positive, or exceeding `max_val`.
+ */
+static int parse_positive_int_arg(const char *s, int max_val, int *out)
+{
+  if (s == NULL || !isdigit((unsigned char)*s)) {
+    return -1;
+  }
+  char *endptr = NULL;
+  errno = 0;
+  long val = strtol(s, &endptr, 10);
+  if (errno != 0 || endptr == s || *endptr != '\0' || val < 1 || val > max_val) {
+    return -1;
+  }
+  *out = (int)val;
   return 0;
 }
 
@@ -122,17 +152,25 @@ static int rdb_passes(double rdb_min, double rdb_max, const rdb_filter_t *flt)
 /**
  * @brief Print command-line usage instructions to stdout.
  *
- * @param[in] argc Actual argument count received by `main()`, reported in the diagnostic line.
+ * @param[in] show_arg_err If non-zero, prefix with a `"Too few arguments"` diagnostic.
+ * @param[in] argc         Actual argument count received by `main()`.
  */
-static void print_usage(int argc)
+static void print_usage(int show_arg_err, int argc)
 {
+  if (show_arg_err) {
+    printf("Too few arguments found (%d).\n", argc);
+  }
   printf(
-    "Too few arguments found (%d).\nUsage:\n"
+    "Usage:\n"
     "calcmass [options] -mass [type] [Chemical formula]\n"
     "calcmass [options] -chem [type] [Chemical limits] [mass]\n"
     "calcmass [options] --chem-rdb [type] [Chemical limits] [mass]\n\n"
     "Options:\n"
+    "  -h, --help       Show this help message and exit\n"
     "  -s, --s          Short output (M/Z line only for -mass; table only for -chem)\n"
+    "  --ppm <val>      Max relative mass error in ppm for -chem (default: %.1f)\n"
+    "  --da <val>       Max absolute mass error in Da for -chem (default: %.2f)\n"
+    "  --top <n>        Max number of best formulas to show (default: %d)\n"
     "  --rdb-min <val>  Minimum allowed neutral-molecule RDB (default 0.0 for --chem-rdb)\n"
     "  --rdb-max <val>  Maximum allowed neutral-molecule RDB\n"
     "  --rdb-strict     Apply RDB bounds strictly to organic baseline (S=2, P=3)\n\n"
@@ -141,22 +179,25 @@ static void print_usage(int argc)
     "[Chemical formula] is in the form C10,N6,O2,H13,Cl, C10H13N6O2Cl, or 'Ca(OH)2'\n"
     "                   (quote formulas containing parentheses in the shell)\n"
     "[Chemical limits]  is in the form C8-10,N6,O1-2,H1-13,Cl\n"
-    "[mass]             is a positive number or +/- expression, e.g. '362.1003 - 242.0576'\n", argc);
+    "[mass]             is a positive number or +/- expression, e.g. '362.1003 - 242.0576'\n",
+    DEFAULT_MAX_DIFF_PPM, DEFAULT_MAX_DIFF, DEFAULT_N_BEST);
 }
 
 /**
- * @brief Program entry point: parses CLI arguments and dispatches `-mass` or `-chem` modes.
+ * @brief Program entry point: parses CLI options/arguments and dispatches `-mass` or `-chem` modes.
  *
- * Recognizes optional `-s` / `--s` (short output) at any position in `argv`, leaving
+ * Recognizes optional flags (`-h`/`--help`, `-s`/`--s`, `--ppm`, `--da`, `--top`,
+ * `--rdb-min`, `--rdb-max`, `--rdb-strict`) at any position in `argv`, leaving
  * positional arguments:
  * - `pos[0]`: Mode flag: `-mass`/`--mass`, `-chem`/`--chem`, or `-chem-rdb`/`--chem-rdb`.
  * - `pos[1]`: Ion/adduct name (e.g., `M`, `MH+`, `MNa+`, `M2H++`).
  * - `pos[2]`: Chemical formula (in `-mass` mode) or element limits (in `-chem` modes).
- * - `pos[3]`: Required in `-chem` modes; strictly positive finite target mass/m/z in Da.
+ * - `pos[3]`: Required in `-chem` modes; positive target mass or `+`/`-` mass expression in Da.
  *
- * @param[in] argc Number of command-line arguments (at least 3 positional args for `-mass`, 4 for `-chem`).
+ * @param[in] argc Number of command-line arguments.
  * @param[in] argv Array of NUL-terminated command-line argument strings.
- * @return `0` on success; `1` on invalid arguments, unknown mode/adduct, parse error, or invalid target mass.
+ * @return `0` on success (including `-h`/`--help`); `1` on invalid arguments, unknown
+ *         mode/adduct, incompatible options, parse error, or invalid target mass.
  */
 int main(int argc, char **argv)
 {
@@ -166,9 +207,16 @@ int main(int argc, char **argv)
   char fs[1024];
   char rdb_buf[64];
   mass_t MT;
+  int help_flag = 0;
   int short_flag = 0;
   int npos = 0;
   int rc = 0;
+
+  double max_diff = DEFAULT_MAX_DIFF;
+  double max_diff_ppm = DEFAULT_MAX_DIFF_PPM;
+  int top_n = DEFAULT_N_BEST;
+  int has_search_opt = 0;
+  const char *first_search_opt = NULL;
 
   rdb_filter_t rdb_flt = { 0, 0, 0.0, 0, 0.0, 0 };
 
@@ -184,10 +232,50 @@ int main(int argc, char **argv)
   }
 
   for (int a = 1; a < argc; a++) {
-    if (strcmp(argv[a], "-s") == 0 || strcmp(argv[a], "--s") == 0) {
+    if (strcmp(argv[a], "-h") == 0 || strcmp(argv[a], "--help") == 0) {
+      help_flag = 1;
+    } else if (strcmp(argv[a], "-s") == 0 || strcmp(argv[a], "--s") == 0) {
       short_flag = 1;
+    } else if (strcmp(argv[a], "--ppm") == 0) {
+      if (a + 1 >= argc) {
+        fprintf(stderr, "Missing value for --ppm\n");
+        free(pos);
+        return 1;
+      }
+      if (parse_double_arg(argv[++a], &max_diff_ppm) != 0 || max_diff_ppm <= 0.0) {
+        fprintf(stderr, "Invalid --ppm value: '%s' (must be > 0)\n", argv[a]);
+        free(pos);
+        return 1;
+      }
+      if (!has_search_opt) { has_search_opt = 1; first_search_opt = "--ppm"; }
+    } else if (strcmp(argv[a], "--da") == 0) {
+      if (a + 1 >= argc) {
+        fprintf(stderr, "Missing value for --da\n");
+        free(pos);
+        return 1;
+      }
+      if (parse_double_arg(argv[++a], &max_diff) != 0 || max_diff <= 0.0) {
+        fprintf(stderr, "Invalid --da value: '%s' (must be > 0)\n", argv[a]);
+        free(pos);
+        return 1;
+      }
+      if (!has_search_opt) { has_search_opt = 1; first_search_opt = "--da"; }
+    } else if (strcmp(argv[a], "--top") == 0) {
+      if (a + 1 >= argc) {
+        fprintf(stderr, "Missing value for --top\n");
+        free(pos);
+        return 1;
+      }
+      if (parse_positive_int_arg(argv[++a], MAX_N_BEST, &top_n) != 0) {
+        fprintf(stderr, "Invalid --top value: '%s' (must be an integer in 1..%d)\n",
+                argv[a], MAX_N_BEST);
+        free(pos);
+        return 1;
+      }
+      if (!has_search_opt) { has_search_opt = 1; first_search_opt = "--top"; }
     } else if (strcmp(argv[a], "--rdb-strict") == 0) {
       rdb_flt.strict_min = 1;
+      if (!has_search_opt) { has_search_opt = 1; first_search_opt = "--rdb-strict"; }
     } else if (strcmp(argv[a], "--rdb-min") == 0) {
       if (a + 1 >= argc) {
         fprintf(stderr, "Missing value for --rdb-min\n");
@@ -200,6 +288,7 @@ int main(int argc, char **argv)
         return 1;
       }
       rdb_flt.has_min = 1;
+      if (!has_search_opt) { has_search_opt = 1; first_search_opt = "--rdb-min"; }
     } else if (strcmp(argv[a], "--rdb-max") == 0) {
       if (a + 1 >= argc) {
         fprintf(stderr, "Missing value for --rdb-max\n");
@@ -212,9 +301,18 @@ int main(int argc, char **argv)
         return 1;
       }
       rdb_flt.has_max = 1;
+      if (!has_search_opt) { has_search_opt = 1; first_search_opt = "--rdb-max"; }
     } else {
       pos[npos++] = argv[a];
     }
+  }
+
+  if (help_flag) {
+    printf("\ncalcmass by Maxim A. Dubinnyi\n");
+    printf("Version 2026-11-27\n\n");
+    print_usage(0, argc);
+    free(pos);
+    return 0;
   }
 
   if (rdb_flt.has_min && rdb_flt.has_max && rdb_flt.min_val > rdb_flt.max_val) {
@@ -226,11 +324,20 @@ int main(int argc, char **argv)
 
   if (!short_flag) {
     printf("\ncalcmass by Maxim A. Dubinnyi\n");
-    printf("Version 2026-11-26\n");
+    printf("Version 2026-11-27\n");
   }
 
   if (npos < 3) {
-    print_usage(argc);
+    print_usage(1, argc);
+    free(pos);
+    return 1;
+  }
+
+  int is_mass_mode = (strcmp(pos[0], "-mass") == 0 || strcmp(pos[0], "--mass") == 0);
+  int is_chem_mode = (strcmp(pos[0], "-chem") == 0 || strcmp(pos[0], "--chem") == 0 ||
+                      strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0);
+  if (!is_mass_mode && !is_chem_mode) {
+    fprintf(stderr, "Unknown argument: %s\n", pos[0]);
     free(pos);
     return 1;
   }
@@ -260,7 +367,13 @@ int main(int argc, char **argv)
            Mass[MT].name, MT, Mass[MT].charge, Mass[MT].madd);
   }
 
-  if (strcmp(pos[0], "-mass") == 0 || strcmp(pos[0], "--mass") == 0) {
+  if (is_mass_mode) {
+    if (has_search_opt) {
+      fprintf(stderr, "Option '%s' is only valid in -chem / --chem-rdb modes\n",
+              first_search_opt);
+      free(pos);
+      return 1;
+    }
     if (npos > 3) {
       fprintf(stderr, "Too many arguments for -mass mode (unexpected: '%s')\n", pos[3]);
       free(pos);
@@ -288,134 +401,160 @@ int main(int argc, char **argv)
     (void)Print_Formula_Mass(fi, MT);
     free(pos);
     return 0;
-  } else if (strcmp(pos[0], "-chem") == 0 || strcmp(pos[0], "--chem") == 0 ||
-             strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
-    if (npos > 4) {
-      fprintf(stderr, "Too many arguments for %s mode (unexpected: '%s')\n", pos[0], pos[4]);
-      free(pos);
-      return 1;
-    }
-    if (strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
-      rdb_flt.require_int = 1;
-      if (!rdb_flt.has_min) {
-        rdb_flt.has_min = 1;
-        rdb_flt.min_val = 0.0;
-      }
-      if (rdb_flt.has_max && rdb_flt.min_val > rdb_flt.max_val) {
-        fprintf(stderr, "--rdb-min (%.3f) cannot exceed --rdb-max (%.3f)\n",
-                rdb_flt.min_val, rdb_flt.max_val);
-        free(pos);
-        return 1;
-      }
-    }
-
-    int rdb_active = rdb_flt.require_int || rdb_flt.has_min || rdb_flt.has_max;
-
-    if (Parse_Limits(pos[2], lim) != 0) {
-      free(pos);
-      return 1;
-    }
-    if (!short_flag) {
-      Print_Limits(lim, fs, sizeof(fs));
-      printf("\nParsed limits: '%s'\n", fs);
-    }
-
-    if (npos < 4) {
-      fprintf(stderr, "Please enter the target mass\n");
-      free(pos);
-      return 1;
-    }
-
-    if (Parse_Mass_Expr(pos[3], &Target_Mass) != 0 || Target_Mass <= 0.0) {
-      fprintf(stderr, "Invalid target mass: '%s'\n", pos[3]);
-      free(pos);
-      return 1;
-    }
-    if (!short_flag) {
-      printf("Target mass is %10.6f\n", Target_Mass);
-      printf("RDB check flag is %d\n", rdb_active);
-    }
-
-    int i = 0;
-    long count = 0;
-    chem = CHEM_LIST;
-    for (Loop_Init(pfi, plim); Loop_End(pfi, plim); Loop_Next(pfi, plim)) {
-      Loop_Copy(&(chem->f), pfi);
-      chem->mass          = Calc_Mass_Charge_Ratio(chem->f, MT);
-      chem->mass_diff     = chem->mass - Target_Mass;
-      chem->mass_diff_ppm = (chem->mass_diff) / Target_Mass * 1000000.0;
-      (void)Calc_RDB_Range(chem->f, &(chem->RDB_min), &(chem->RDB_max));
-      if (rdb_passes(chem->RDB_min, chem->RDB_max, &rdb_flt)) {
-        i++;
-        chem++;
-        count++;
-      }
-      if (i >= N_Chem) {
-        qsort(CHEM_LIST, N_Chem, sizeof(fmass_t), Mass_Diff);
-        i = N_Best;
-        chem = CHEM_LIST + i;
-      }
-    }
-
-    if (i > 1) {
-      qsort(CHEM_LIST, (size_t)i, sizeof(fmass_t), Mass_Diff);
-    }
-    int n_chem = i;
-    if (!short_flag) {
-      printf("Chemical formulas considered: %ld\n", count);
-    }
-
-    int n_act = n_chem < N_Best ? n_chem : N_Best;
-    if (n_act == 0) {
-      printf("No matching chemical formulas found.\n");
-      free(pos);
-      return 0;
-    }
-
-    int n_print;
-    for (n_print = 0;
-         n_print < n_act &&
-         fabs(CHEM_LIST[n_print].mass_diff) <= MAX_DIFF &&
-         fabs(CHEM_LIST[n_print].mass_diff_ppm) <= MAX_DIFF_PPM;
-         n_print++) {
-    }
-
-    if (n_print == 0) n_print = 1;
-
-    if (!short_flag) {
-      printf("Best %d formulas with mass difference less than %8.6f Da and %7.3f ppm",
-             n_print, MAX_DIFF, MAX_DIFF_PPM);
-      if (rdb_active) {
-        int sep = 0;
-        printf(" (neutral RDB filter: ");
-        if (rdb_flt.require_int) { printf("integer"); sep = 1; }
-        if (rdb_flt.has_min) { printf("%smin=%.1f", sep ? ", " : "", rdb_flt.min_val); sep = 1; }
-        if (rdb_flt.has_max) { printf("%smax=%.1f", sep ? ", " : "", rdb_flt.max_val); sep = 1; }
-        if (rdb_flt.strict_min) { printf("%sstrict S=2/P=3", sep ? ", " : ""); }
-        printf("):\n");
-      } else {
-        printf(":\n");
-      }
-    }
-    printf("%25s  %10s  %12s %11s  %4s\n", "Formula", "Theory", "Mass diff", "Mass diff", "RDB");
-    for (int idx = 0; idx < n_print; idx++) {
-      Print_Formula(CHEM_LIST[idx].f, fs, sizeof(fs));
-      format_rdb(CHEM_LIST[idx].RDB_min, CHEM_LIST[idx].RDB_max, rdb_buf, sizeof(rdb_buf));
-      printf("%25s: %7.6f  %8.3f mDa %7.3f ppm  %s\n", fs,
-             CHEM_LIST[idx].mass,
-             CHEM_LIST[idx].mass_diff * 1000.0,
-             CHEM_LIST[idx].mass_diff_ppm,
-             rdb_buf);
-    }
-    if (!short_flag && !rdb_flt.require_int) {
-      printf("use --chem-rdb instead of --chem\nto ignore formulas with NEGATIVE or HALF-INTEGER neutral RDB values\n");
-    }
-    rc = 0;
-  } else {
-    fprintf(stderr, "Unknown argument: %s\n", pos[0]);
-    rc = 1;
   }
 
+  /* -chem / --chem / -chem-rdb / --chem-rdb */
+  if (npos > 4) {
+    fprintf(stderr, "Too many arguments for %s mode (unexpected: '%s')\n", pos[0], pos[4]);
+    free(pos);
+    return 1;
+  }
+  if (strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
+    rdb_flt.require_int = 1;
+    if (!rdb_flt.has_min) {
+      rdb_flt.has_min = 1;
+      rdb_flt.min_val = 0.0;
+    }
+    if (rdb_flt.has_max && rdb_flt.min_val > rdb_flt.max_val) {
+      fprintf(stderr, "--rdb-min (%.3f) cannot exceed --rdb-max (%.3f)\n",
+              rdb_flt.min_val, rdb_flt.max_val);
+      free(pos);
+      return 1;
+    }
+  }
+
+  int rdb_active = rdb_flt.require_int || rdb_flt.has_min || rdb_flt.has_max;
+
+  if (Parse_Limits(pos[2], lim) != 0) {
+    free(pos);
+    return 1;
+  }
+  if (!short_flag) {
+    Print_Limits(lim, fs, sizeof(fs));
+    printf("\nParsed limits: '%s'\n", fs);
+  }
+
+  if (npos < 4) {
+    fprintf(stderr, "Please enter the target mass\n");
+    free(pos);
+    return 1;
+  }
+
+  if (Parse_Mass_Expr(pos[3], &Target_Mass) != 0 || Target_Mass <= 0.0) {
+    fprintf(stderr, "Invalid target mass: '%s'\n", pos[3]);
+    free(pos);
+    return 1;
+  }
+  if (!short_flag) {
+    printf("Target mass is %10.6f\n", Target_Mass);
+    printf("RDB check flag is %d\n", rdb_active);
+  }
+
+  size_t buf_cap = (size_t)top_n + CHEM_BATCH_SIZE;
+  fmass_t *chem_list = (fmass_t *)malloc(buf_cap * sizeof(*chem_list));
+  if (chem_list == NULL) {
+    fprintf(stderr, "Memory allocation failed\n");
+    free(pos);
+    return 1;
+  }
+
+  size_t i = 0;
+  unsigned long long count = 0;
+  int has_worst = 0;
+  double worst_diff = 0.0;
+
+  for (Loop_Init(pfi, plim); Loop_End(pfi, plim); Loop_Next(pfi, plim)) {
+    double rdb_min, rdb_max;
+    (void)Calc_RDB_Range(*pfi, &rdb_min, &rdb_max);
+    if (!rdb_passes(rdb_min, rdb_max, &rdb_flt)) {
+      continue;
+    }
+    count++;
+
+    double cand_mass = Calc_Mass_Charge_Ratio(*pfi, MT);
+    double cand_diff = cand_mass - Target_Mass;
+    if (has_worst && fabs(cand_diff) > worst_diff) {
+      continue;
+    }
+
+    fmass_t *slot = &chem_list[i++];
+    Loop_Copy(&(slot->f), pfi);
+    slot->mass          = cand_mass;
+    slot->mass_diff     = cand_diff;
+    slot->mass_diff_ppm = (cand_diff / Target_Mass) * 1000000.0;
+    slot->RDB_min       = rdb_min;
+    slot->RDB_max       = rdb_max;
+
+    if (i >= buf_cap) {
+      qsort(chem_list, buf_cap, sizeof(*chem_list), Mass_Diff);
+      i = (size_t)top_n;
+      worst_diff = fabs(chem_list[top_n - 1].mass_diff);
+      has_worst = 1;
+    }
+  }
+
+  if (i > 1) {
+    qsort(chem_list, i, sizeof(*chem_list), Mass_Diff);
+  }
+  if (!short_flag) {
+    printf("Chemical formulas considered: %llu\n", count);
+  }
+
+  size_t n_act = i < (size_t)top_n ? i : (size_t)top_n;
+  if (n_act == 0) {
+    printf("No matching chemical formulas found.\n");
+    free(chem_list);
+    free(pos);
+    return 0;
+  }
+
+  size_t n_in_tol;
+  for (n_in_tol = 0;
+       n_in_tol < n_act &&
+       fabs(chem_list[n_in_tol].mass_diff) <= max_diff &&
+       fabs(chem_list[n_in_tol].mass_diff_ppm) <= max_diff_ppm;
+       n_in_tol++) {
+  }
+
+  size_t n_print = (n_in_tol > 0) ? n_in_tol : 1;
+
+  if (!short_flag) {
+    if (n_in_tol > 0) {
+      printf("Best %zu formulas with mass difference less than %8.6f Da and %7.3f ppm",
+             n_print, max_diff, max_diff_ppm);
+    } else {
+      printf("No formulas within %8.6f Da and %7.3f ppm", max_diff, max_diff_ppm);
+    }
+    if (rdb_active) {
+      int sep = 0;
+      printf(" (neutral RDB filter: ");
+      if (rdb_flt.require_int) { printf("integer"); sep = 1; }
+      if (rdb_flt.has_min) { printf("%smin=%.1f", sep ? ", " : "", rdb_flt.min_val); sep = 1; }
+      if (rdb_flt.has_max) { printf("%smax=%.1f", sep ? ", " : "", rdb_flt.max_val); sep = 1; }
+      if (rdb_flt.strict_min) { printf("%sstrict S=2/P=3", sep ? ", " : ""); }
+      printf(")");
+    }
+    if (n_in_tol > 0) {
+      printf(":\n");
+    } else {
+      printf("; closest match:\n");
+    }
+  }
+  printf("%25s  %10s  %12s %11s  %4s\n", "Formula", "Theory", "Mass diff", "Mass diff", "RDB");
+  for (size_t idx = 0; idx < n_print; idx++) {
+    Print_Formula(chem_list[idx].f, fs, sizeof(fs));
+    format_rdb(chem_list[idx].RDB_min, chem_list[idx].RDB_max, rdb_buf, sizeof(rdb_buf));
+    printf("%25s: %10.6f  %8.3f mDa %7.3f ppm  %s\n", fs,
+           chem_list[idx].mass,
+           chem_list[idx].mass_diff * 1000.0,
+           chem_list[idx].mass_diff_ppm,
+           rdb_buf);
+  }
+  if (!short_flag && !rdb_flt.require_int) {
+    printf("use --chem-rdb instead of --chem\nto ignore formulas with NEGATIVE or HALF-INTEGER neutral RDB values\n");
+  }
+
+  free(chem_list);
   free(pos);
   return rc;
 }
@@ -442,7 +581,7 @@ double Print_Formula_Mass(formula_t fi, mass_t mt)
     double me = Isotopes[e].dmass * fi[e];
     mass += me;
     if (fi[e]) {
-      printf("%2s %2d %9.6f %11.6f\n",
+      printf("%2s %3d %9.6f %11.6f\n",
              Isotopes[e].name, fi[e], Isotopes[e].dmass, me);
     }
   }
@@ -511,7 +650,8 @@ void Print_Formula(formula_t fi, char *str, size_t str_size)
     rem -= (size_t)n;
   }
   if (fi[0] <= -2 || fi[0] >= 2) {
-    n = snprintf(s, rem, "%d", fi[0] > 0 ? fi[0] : -fi[0]);
+    long long q = fi[0];
+    n = snprintf(s, rem, "%lld", q > 0 ? q : -q);
     if (n < 0 || (size_t)n >= rem) return;
   }
 }

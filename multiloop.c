@@ -61,9 +61,10 @@ void Loop_Init(formula_t *ft, limits_t *lim)
 /**
  * @brief Advance iterator state `ft` to the next combination in lexicographical order.
  *
- * Increments element 1 (`C`) and propagates carries through `1 .. NI-1` whenever
- * `(*ft)[e] > (*lim)[e].max`, resetting rolled-over positions to `(*lim)[e].min`.
- * When the last element (`NI - 1`) overflows, the sentinel `(*ft)[NI]` becomes non-zero.
+ * Advances the lowest element `e` in `[1, NI)` that is strictly below `(*lim)[e].max`,
+ * resetting rolled-over lower positions to `(*lim)[e].min`. Checking `< max` before
+ * incrementing avoids signed integer overflow even when `(*lim)[e].max == INT_MAX`.
+ * Once all elements are at their maxima, sets the completion sentinel `(*ft)[NI] = 1`.
  *
  * @param[in,out] ft  Iterator state previously initialized with `Loop_Init()`; must be non-NULL.
  * @param[in]     lim Element bounds used for roll-over checks; must be non-NULL and unchanged
@@ -72,10 +73,15 @@ void Loop_Init(formula_t *ft, limits_t *lim)
 void Loop_Next(formula_t *ft, limits_t *lim)
 {
   int e;
-  (*ft)[1]++;
-  for (e = 1; e < NI && (*ft)[e] > (*lim)[e].max; e++) {
+  for (e = 1; e < NI; e++) {
+    if ((*ft)[e] < (*lim)[e].max) {
+      (*ft)[e]++;
+      break;
+    }
     (*ft)[e] = (*lim)[e].min;
-    (*ft)[e + 1]++;
+  }
+  if (e == NI) {
+    (*ft)[NI] = 1;
   }
   IFDEBUG {
     printf("Loop_Next: ");
