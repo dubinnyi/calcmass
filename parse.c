@@ -17,6 +17,7 @@
 #include <string.h>
 #include <limits.h>
 #include <errno.h>
+#include <math.h>
 
 #include "isotopes.h"
 
@@ -409,5 +410,138 @@ int Parse_Limits(const char *fc, limits_t lim)
     fprintf(stderr, "Empty element limits\n");
     return -1;
   }
+  return 0;
+}
+
+/**
+ * @brief Advance `*pp` past ASCII spaces/tabs and UTF-8 non-breaking spaces (U+00A0).
+ */
+static void skip_expr_ws(const char **pp)
+{
+  const char *p = *pp;
+  while (*p) {
+    if (*p == ' ' || *p == '\t') {
+      p++;
+    } else if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xA0) {
+      p += 2;
+    } else {
+      break;
+    }
+  }
+  *pp = p;
+}
+
+/**
+ * @brief Consume a `+` or `-` operator (including Unicode minus U+2212 and en-dash U+2013).
+ *
+ * @param[in,out] pp Address of the current cursor in the expression string.
+ * @return `+1` for `+`, `-1` for `-`/`−`/`–`, or `0` if no operator is present.
+ */
+static int consume_mass_op(const char **pp)
+{
+  const char *p = *pp;
+  if (*p == '+') {
+    *pp = p + 1;
+    return +1;
+  }
+  if (*p == '-') {
+    *pp = p + 1;
+    return -1;
+  }
+  /* UTF-8 U+2212 MINUS SIGN (E2 88 92) and U+2013 EN DASH (E2 80 93) */
+  if ((unsigned char)p[0] == 0xE2 &&
+      (((unsigned char)p[1] == 0x88 && (unsigned char)p[2] == 0x92) ||
+       ((unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x93))) {
+    *pp = p + 3;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * @brief Parse a single unsigned finite decimal floating-point term at `*pp`.
+ *
+ * Rejects leading signs, hex floats (`0x...`), `inf`, and `nan`.
+ *
+ * @param[in,out] pp  Address of the current cursor; advanced past the parsed number on success.
+ * @param[out]    out Destination for the parsed value.
+ * @return `0` on success; `-1` if no valid unsigned decimal number starts at `*pp`.
+ */
+static int parse_unsigned_term(const char **pp, double *out)
+{
+  skip_expr_ws(pp);
+  const char *p = *pp;
+
+  if (!isdigit((unsigned char)*p) &&
+      !(*p == '.' && isdigit((unsigned char)p[1]))) {
+    return -1;
+  }
+  if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+    return -1;
+  }
+
+  char *endptr = NULL;
+  errno = 0;
+  double val = strtod(p, &endptr);
+  if (errno != 0 || endptr == p || !isfinite(val)) {
+    return -1;
+  }
+
+  *pp = endptr;
+  *out = val;
+  return 0;
+}
+
+/**
+ * @brief Parse a numeric target mass or additive `+`/`-` arithmetic expression.
+ *
+ * Evaluates a left-to-right sum/difference of finite decimal numbers, supporting
+ * ASCII `+`/`-` as well as UTF-8 Unicode minus (`−`, U+2212) and en-dash (`–`, U+2013)
+ * with optional whitespace (e.g., `"362.1003 - 242.0576"`, `"362.1003 − 242.0576"`,
+ * `"242.0576 + 120.0427"`). Useful for direct neutral-loss mass searches in MS/MS.
+ *
+ * @param[in]  expr NUL-terminated expression string; must be non-NULL.
+ * @param[out] out  Destination for the evaluated result; must be non-NULL.
+ * @return `0` on success; `-1` on empty input, syntax error, or non-finite result.
+ */
+int Parse_Mass_Expr(const char *expr, double *out)
+{
+  if (expr == NULL || out == NULL) {
+    return -1;
+  }
+
+  const char *p = expr;
+  skip_expr_ws(&p);
+  if (!*p) {
+    return -1;
+  }
+
+  int sign = consume_mass_op(&p);
+  if (sign == 0) sign = +1;
+
+  double term = 0.0;
+  if (parse_unsigned_term(&p, &term) != 0) {
+    return -1;
+  }
+
+  double total = sign * term;
+  for (;;) {
+    skip_expr_ws(&p);
+    if (!*p) break;
+
+    int op = consume_mass_op(&p);
+    if (op == 0) {
+      return -1;
+    }
+    if (parse_unsigned_term(&p, &term) != 0) {
+      return -1;
+    }
+    total += op * term;
+    if (!isfinite(total)) {
+      return -1;
+    }
+  }
+
+  *out = total;
   return 0;
 }

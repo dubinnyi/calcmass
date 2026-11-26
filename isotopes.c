@@ -18,24 +18,25 @@
 #define True  1
 
 /* Monoisotopic neutral atomic masses from AME2020 (Wang et al., Chin. Phys. C 45, 030003, 2021)
- * and electron relative atomic mass from CODATA 2022 (in unified atomic mass units / Da). */
+ * and electron relative atomic mass from CODATA 2022 (in unified atomic mass units / Da).
+ * Valence columns give [valence_min, valence_max] for RDB range calculation (P: 3..5, S: 2..6). */
 isotope_t Isotopes[NI] =
 {
-  { "e",  0,  0.000548579909, 0, False },  /*  0  ELECTRON    */
-  { "C", 12, 12.000000000000, 4, True  },  /*  1  CARBON      */
-  { "H",  1,  1.007825031898, 1, True  },  /*  2  PROTON      */
-  { "N", 14, 14.00307400425,  3, True  },  /*  3  NITROGEN    */
-  { "O", 16, 15.99491461926,  2, True  },  /*  4  OXYGEN      */
-  { "P", 31, 30.97376199768,  5, False },  /*  5  PHOSPHORUS  */
-  { "S", 32, 31.9720711744,   6, True  },  /*  6  SULFUR      */
-  {"Na", 23, 22.98976928195,  1, True  },  /*  7  SODIUM      */
-  {"Ca", 40, 39.962590863,    2, True  },  /*  8  CALCIUM     */
-  { "K", 39, 38.963706486,    1, True  },  /*  9  POTASSIUM   */
+  { "e",  0,  0.000548579909, 0, 0 },  /*  0  ELECTRON    */
+  { "C", 12, 12.000000000000, 4, 4 },  /*  1  CARBON      */
+  { "H",  1,  1.007825031898, 1, 1 },  /*  2  PROTON      */
+  { "N", 14, 14.00307400425,  3, 3 },  /*  3  NITROGEN    */
+  { "O", 16, 15.99491461926,  2, 2 },  /*  4  OXYGEN      */
+  { "P", 31, 30.97376199768,  3, 5 },  /*  5  PHOSPHORUS  */
+  { "S", 32, 31.9720711744,   2, 6 },  /*  6  SULFUR      */
+  {"Na", 23, 22.98976928195,  1, 1 },  /*  7  SODIUM      */
+  {"Ca", 40, 39.962590863,    2, 2 },  /*  8  CALCIUM     */
+  { "K", 39, 38.963706486,    1, 1 },  /*  9  POTASSIUM   */
 
-  { "B", 11, 11.009305166,    3, True  },  /* 10  BORON       */
-  { "F", 19, 18.99840316207,  1, True  },  /* 11  FLUORINE    */
-  {"Cl", 35, 34.968852694,    1, True  },  /* 12  CHLORINE    */
-  {"Br", 79, 78.918337574,    1, True  },  /* 13  BROMINE     */
+  { "B", 11, 11.009305166,    3, 3 },  /* 10  BORON       */
+  { "F", 19, 18.99840316207,  1, 1 },  /* 11  FLUORINE    */
+  {"Cl", 35, 34.968852694,    1, 1 },  /* 12  CHLORINE    */
+  {"Br", 79, 78.918337574,    1, 1 },  /* 13  BROMINE     */
 };
 
 int Mass_Init_Flag = 0;
@@ -113,31 +114,55 @@ double Calc_Mass(formula_t fi, mass_t M)
 }
 
 /**
- * @brief Calculate Ring and Double Bond (RDB) equivalents for a chemical formula.
+ * @brief Calculate the Ring and Double Bond (RDB) range `[rdb_min, rdb_max]` for a formula.
  *
- * Uses the standard formula: `RDB = 1 + sum_{e=1}^{NI-1} ((valence_e - 2) / 2) * count_e`.
- * Index 0 (electrons) is intentionally skipped so explicit ion charge does not skew RDB.
- * Lazily invokes `mass_type_init()` if not yet initialized.
+ * Uses `RDB = 1 + sum_{e=1}^{NI-1} ((valence_e - 2) / 2) * count_e` evaluated at both
+ * `valence_min` (e.g., S=2, P=3) and `valence_max` (e.g., S=6, P=5). Because
+ * `valence_max - valence_min` is always even, `rdb_min` and `rdb_max` always share
+ * the same parity (both integer or both half-integer). Index 0 (electrons) is skipped
+ * so explicit ion charge does not skew RDB.
  *
- * @param[in]  fi  Composition vector with initialized entries in `[0, NI)`.
- * @param[out] rdb Pointer to receive the computed RDB value; must be non-NULL.
- * @return 1 (`True`) if every present element has an unambiguous valence (`v_unambig != 0`);
- *         0 (`False`) if any present element has variable valence (e.g., phosphorus).
+ * @param[in]  fi      Composition vector with initialized entries in `[0, NI)`.
+ * @param[out] rdb_min Optional pointer to receive lower RDB bound (may be NULL).
+ * @param[out] rdb_max Optional pointer to receive upper RDB bound (may be NULL).
+ * @return 1 (`True`) if every present element has unambiguous valence (`valence_min == valence_max`);
+ *         0 (`False`) if any present element has variable valence (e.g., S or P).
  */
-int Calc_RDB(formula_t fi, double *rdb)
+int Calc_RDB_Range(formula_t fi, double *rdb_min, double *rdb_max)
 {
-  *rdb = 1.0;
+  double rmin = 1.0;
+  double rmax = 1.0;
   int unambig_flag = True;
   int e;
 
   if (!Mass_Init_Flag) mass_type_init();
   /* Start at e = 1 to skip electrons (index 0) */
   for (e = 1; e < NI; e++) {
-    (*rdb) += (Isotopes[e].valence - 2.0) / 2.0 * fi[e];
-    if (fi[e])
-      unambig_flag &= Isotopes[e].v_unambig;
+    if (fi[e] != 0) {
+      rmin += (Isotopes[e].valence_min - 2.0) / 2.0 * fi[e];
+      rmax += (Isotopes[e].valence_max - 2.0) / 2.0 * fi[e];
+      if (Isotopes[e].valence_min != Isotopes[e].valence_max) {
+        unambig_flag = False;
+      }
+    }
   }
+  if (rdb_min != NULL) *rdb_min = rmin;
+  if (rdb_max != NULL) *rdb_max = rmax;
   return unambig_flag;
+}
+
+/**
+ * @brief Calculate the upper-bound Ring and Double Bond (RDB_max) equivalent for a formula.
+ *
+ * Convenience wrapper around `Calc_RDB_Range()` storing `rdb_max` into `*rdb`.
+ *
+ * @param[in]  fi  Composition vector with initialized entries in `[0, NI)`.
+ * @param[out] rdb Pointer to receive `RDB_max`; must be non-NULL.
+ * @return 1 (`True`) if RDB is unambiguous (`RDB_min == RDB_max`); 0 (`False`) otherwise.
+ */
+int Calc_RDB(formula_t fi, double *rdb)
+{
+  return Calc_RDB_Range(fi, NULL, rdb);
 }
 
 /**

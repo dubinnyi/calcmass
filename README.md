@@ -8,9 +8,9 @@ A lightweight C11 command-line utility for high-resolution mass spectrometry (HR
 
 - **Exact mass & *m/z* calculation** (`-mass` / `--mass`) for neutral molecules and 11 common ESI/MS ion adducts (including singly and doubly charged species).
 - **Brute-force formula determination** (`-chem` / `--chem`) over user-specified elemental composition ranges, ranked by mass error in `mDa` and `ppm`.
-- **RDB / unsaturation filtering** (`-chem-rdb` / `--chem-rdb`) to automatically reject chemically invalid formulas with negative or half-integer RDB values.
+- **Neutral-molecule RDB / unsaturation filtering** (`-chem-rdb` / `--chem-rdb`, `--rdb-min`, `--rdb-max`, `--rdb-strict`) computing exact `[RDB_min, RDB_max]` intervals for variable-valence elements (`S`: 2..6, `P`: 3..5) and rejecting negative or half-integer neutral-molecule RDB values.
 - **Short script-friendly output** (`-s` / `--s`) printing only the *m/z* line for `--mass` or the results table starting from `Formula` for `--chem` / `--chem-rdb`.
-- **Flexible, strict formula input**: accepts comma-separated (`C10,H13,N6,O2,Cl`), compact standard notation (`C10H13N6O2Cl`, `C2H5OH`), and nested parenthesized groups (`Ca(OH)2`, `(CH3)2SO`), failing fast with non-zero exit codes on unknown elements, malformed ranges, or integer overflows.
+- **Flexible, strict formula input**: accepts comma-separated (`C10,H13,N6,O2,Cl`), compact standard notation (`C10H13N6O2Cl`, `C2H5OH`), and nested parenthesized groups (`'Ca(OH)2'`, `'(CH3)2SO'`), failing fast with non-zero exit codes on unknown elements, malformed ranges, or integer overflows.
 - **Zero external dependencies**: builds with standard GCC and `libm`.
 
 ---
@@ -30,10 +30,13 @@ cd calcmass
 make
 ```
 
-This builds the `./calcmass` executable in the project root. To remove build artifacts:
+This builds the `./calcmass` executable in the project root. Useful `make` targets:
 
 ```bash
-make clean
+make test       # Build and run C unit tests + CLI integration tests
+make debug      # Build with -O0 -g and ASan/UBSan sanitizers (requires libasan/libubsan)
+make install    # Install to /usr/local/bin (override with PREFIX=...)
+make clean      # Remove executables and object files
 ```
 
 ---
@@ -41,13 +44,37 @@ make clean
 ## Usage
 
 ```bash
-./calcmass [-s|--s] --mass     <type> <formula>
-./calcmass [-s|--s] --chem     <type> <limits> <target_mass>
-./calcmass [-s|--s] --chem-rdb <type> <limits> <target_mass>
+./calcmass [options] --mass     <type> <formula>
+./calcmass [options] --chem     <type> <limits> <target_mass>
+./calcmass [options] --chem-rdb <type> <limits> <target_mass>
 ```
 
 - Short single-dash mode flags (`-mass`, `-chem`, `-chem-rdb`) are also accepted.
-- `-s` / `--s` can be placed anywhere in the command line to suppress banners and metadata, leaving only the essential result.
+- Options can be placed anywhere on the command line:
+  - `-s`, `--s` — suppress banners and metadata, printing only the *m/z* line (`--mass`) or the results table (`--chem`).
+  - `--rdb-min <val>`, `--rdb-max <val>` — inclusive lower/upper bounds on **neutral-molecule RDB** (default lower bound for `--chem-rdb` is `0.0`).
+  - `--rdb-strict` — apply RDB bounds strictly against the organic baseline (`S=2`, `P=3`) instead of accepting any valid valence in `[S=2..6, P=3..5]`.
+
+### RDB Convention (Important Note for Xcalibur / MassLynx Users)
+
+`calcmass` always separates the ionizing adduct (`+H+`, `-H+`, `+Na+`, `+2H2+`, etc.) from the **neutral molecule `M`** and computes RDB strictly for the **neutral formula `M`**:
+
+$$\mathrm{RDB}(M) = 1 + \frac{1}{2}\sum_{e} (v_e - 2)\, n_e$$
+
+This differs from vendor tools such as **Thermo Xcalibur** or **Waters MassLynx**, which report the **ionic formula** (including the ionizing proton/cation) and therefore display **half-integer RDB** for even-electron ions (`[M+H]+`, `[M-H]-`):
+
+| Species for `M = C16H17N3O7` | `calcmass` (neutral `M` convention) | Xcalibur / MassLynx (ionic formula convention) |
+| :--- | :--- | :--- |
+| Neutral `M` | `C16H17N3O7`, **RDB = `10.0`** | `C16H17N3O7`, RDB = `10.0` |
+| Protonated `[M+H]+` | `C16H17N3O7`, **RDB = `10.0`** | `[C16H18N3O7]+`, RDB = `9.5` |
+| Deprotonated `[M-H]-` | `C16H17N3O7`, **RDB = `10.0`** | `[C16H16N3O7]-`, RDB = `10.5` |
+| Sodiated `[M+Na]+` | `C16H17N3O7`, **RDB = `10.0`** | `[C16H17N3O7Na]+`, RDB = `9.5` |
+
+**Why `calcmass` uses neutral-molecule RDB:**
+- RDB stays an intrinsic structural property of the molecule (rings + $\pi$-bonds), identical across `MH+`, `MH-`, `MNa+`, and `M2H++` spectra — matching the neutral-formula convention commonly used in metabolomics, natural-product, and organic-chemistry publications (as well as SIRIUS and Agilent MassHunter neutral tables).
+- In MS(*n*) fragmentation analysis, precursor, product ion, and neutral loss formulas balance directly without proton bookkeeping (`C16H17N3O7 = C12H9N3O3 + C4H8O4`).
+- Consequently, `--chem-rdb` always selects **integer, non-negative RDB** (closed-shell neutral molecules) even when searching `MH+` or `MH-`. If you specifically want to inspect odd-electron/radical neutral compositions (half-integer neutral RDB), use `--chem` without `-rdb`.
+- For variable-valence elements — **sulfur** (`S`, valence `2, 4, 6`) and **phosphorus** (`P`, valence `3, 5`) — RDB is reported as an interval `RDB_min..RDB_max` (e.g., `1.0..3.0` for cysteine `C3H7NO2S`, `-2.0..0.0` for `SF6`, `0.0..1.0` for `H3PO4`). Parity never changes because valence steps are even (`±2`). By default `--chem-rdb` keeps a formula if any valid valence assignment has `RDB >= 0` (`RDB_max >= 0`); pass `--rdb-strict` to enforce `RDB_min >= 0` (divalent `S=2`, trivalent `P=3`).
 
 ### Supported Ion / Adduct Types (`<type>`)
 
@@ -71,8 +98,10 @@ make clean
 
 ### Formula and Limits Syntax
 
-- **Formula**: `C16H17N3O7`, `C16,H17,N3,O7`, `C2H5OH`, `Ca(OH)2`, or `(CH3)2SO` (repeated elements are summed; nested parentheses are supported).
+- **Formula**: `C16H17N3O7`, `C16,H17,N3,O7`, `C2H5OH`, `'Ca(OH)2'`, or `'(CH3)2SO'` (repeated elements are summed; nested parentheses are supported).
+  > **Shell note:** Always enclose formulas containing parentheses in single quotes (e.g., `./calcmass --mass M '(CH3)2SO'`), since `(` and `)` are shell metacharacters in `bash`/`sh`/`zsh` and will trigger a shell syntax error if left unquoted.
 - **Limits**: `<Elem><min>-<max>` or fixed count `<Elem><n>` / `<Elem>` (implies `1`), e.g. `C0-30,H0-60,N0-5,O0-20` or `C8-10,N6,O1-2,H1-13,Cl`.
+- **Target mass (`<target_mass>`)**: accepts either a single positive number (`120.0427`) or an additive `+`/`-` expression (including Unicode minus `−` and en-dash `–`), e.g., `'362.1003 - 242.0576'` or `'242.0576 + 120.0427'` (quote expressions containing spaces in the shell).
 - **Search window**: prints up to the top 30 hits within `0.1 Da` and `20 ppm` of `<target_mass>` (or the single closest match if none fall within the window).
 
 ---
@@ -191,12 +220,12 @@ When a single precursor *m/z* still admits several valid formulas, combining MS2
             C23,H13,N3,O2: 362.093500    -6.800 mDa -18.779 ppm  19.0
 ```
 
-#### Step B — Neutral loss (`M` = `120.0427`, i.e., `362.1003 − 242.0576`)
+#### Step B — Neutral loss (`M` = `362.1003 − 242.0576` = `120.0427`)
 
-Using adduct type `M` (neutral molecule) identifies candidate neutral losses:
+Using adduct type `M` (neutral molecule) with inline mass subtraction identifies candidate neutral losses directly:
 
 ```bash
-./calcmass -s --chem-rdb M C0-10,H0-20,N0-6,O0-8 120.0427
+./calcmass -s --chem-rdb M C0-10,H0-20,N0-6,O0-8 '362.1003 - 242.0576'
 ```
 
 ```text
@@ -224,11 +253,12 @@ Combining the MS3 fragment (`C12H9N3O3`, −2.01 ppm) and neutral loss (`C4H8O4`
 
 ## Project Structure
 
-- `calcmass.c` — CLI entry point, candidate ranking, and formatted output.
-- `isotopes.h` / `isotopes.c` — Element table, adduct definitions, mass/*m/z*/RDB calculators, and sort comparator.
-- `parse.c` — Chemical formula and elemental range parsers.
+- `calcmass.c` — CLI entry point, RDB filtering, candidate ranking, and formatted output.
+- `isotopes.h` / `isotopes.c` — Element table (AME2020/CODATA 2022 masses and valence ranges), adduct definitions, mass/*m/z*/RDB calculators, and sort comparator.
+- `parse.c` — Strict chemical formula (including nested parentheses) and elemental range parsers.
 - `multiloop.c` — Multi-dimensional iterator over elemental search limits.
-- `Makefile` — Build configuration (`gcc`, C11, strict warnings).
+- `tests/test_unit.c`, `tests/test_cli.sh` — C unit tests and CLI integration test suite.
+- `Makefile` — Build, test, sanitizer, and install configuration (`gcc`/`clang`, C11, strict warnings).
 - `IsotopeMassTable.txt`, `Isotope_Table_NIST.txt` — Reference isotope mass tables.
 
 ## Author

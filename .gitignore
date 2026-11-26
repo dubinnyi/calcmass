@@ -1,6 +1,8 @@
 # Build artifacts
 *.o
 calcmass
+tests/test_unit
+tests/*.o
 
 # Editor backup and swap files
 *~

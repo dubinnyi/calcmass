@@ -24,11 +24,11 @@
  */
 typedef struct
 {
-  char   name[3];    /**< NUL-terminated element symbol (e.g., "C", "Cl", "e"). */
-  int    imass;      /**< Nominal integer mass number (0 for electron). */
-  double dmass;      /**< Exact monoisotopic mass in Daltons (Da). */
-  int    valence;    /**< Standard chemical valence used in RDB calculations. */
-  int    v_unambig;  /**< Non-zero if valence is unambiguous; 0 for variable-valence elements (e.g., P). */
+  char   name[3];      /**< NUL-terminated element symbol (e.g., "C", "Cl", "e"). */
+  int    imass;        /**< Nominal integer mass number (0 for electron). */
+  double dmass;        /**< Exact monoisotopic mass in Daltons (Da). */
+  int    valence_min;  /**< Minimum standard chemical valence for RDB_min (e.g., 2 for S, 3 for P). */
+  int    valence_max;  /**< Maximum standard chemical valence for RDB_max (e.g., 6 for S, 5 for P). */
 } isotope_t;
 
 /** @brief Built-in table of supported isotopes/elements indexed by element ID [0, NI). */
@@ -57,9 +57,8 @@ typedef struct {
   double mass;            /**< Theoretical m/z (or neutral mass for MASS_M) in Da. */
   double mass_diff;       /**< Signed mass error (theory - target) in Da. */
   double mass_diff_ppm;   /**< Signed relative mass error in parts per million (ppm). */
-  double RDB;             /**< Ring and Double Bond equivalent. Neutral closed-shell molecules
-                               normally have an integer, non-negative RDB; half-integer or
-                               negative values indicate unsatisfied valence rules. */
+  double RDB_min;         /**< Lower Ring and Double Bond bound (using minimum element valences, e.g., S=2, P=3). */
+  double RDB_max;         /**< Upper Ring and Double Bond bound (using maximum element valences, e.g., S=6, P=5). */
 } fmass_t;
 
 /** @brief Number of supported ion/adduct types in Mass[]. */
@@ -114,7 +113,10 @@ double Calc_Mass(formula_t fi, mass_t M);
 /** @brief Calculate the neutral monoisotopic mass (Da) of formula `fi` (MASS_M). */
 double Calc_Mass_M(formula_t fi);
 
-/** @brief Calculate Ring and Double Bond (RDB) equivalents for formula `fi`. */
+/** @brief Calculate Ring and Double Bond (RDB) range `[rdb_min, rdb_max]` for formula `fi`. */
+int    Calc_RDB_Range(formula_t fi, double *rdb_min, double *rdb_max);
+
+/** @brief Calculate upper-bound Ring and Double Bond (RDB_max) equivalent for formula `fi`. */
 int    Calc_RDB(formula_t fi, double *rdb);
 
 /** @brief Calculate net electric charge of formula `fi` combined with adduct `M`. */
@@ -139,6 +141,12 @@ int Parse_Formula(const char *fc, formula_t fi);
  * @return `0` on success, `-1` on syntax error, unknown element, or integer overflow.
  */
 int Parse_Limits(const char *fc, limits_t lim);
+
+/**
+ * @brief Parse a target mass number or additive `+`/`-` expression (e.g., `"362.1003 - 242.0576"`).
+ * @return `0` on success, `-1` on syntax error or non-finite result.
+ */
+int Parse_Mass_Expr(const char *expr, double *out);
 
 /* --- Multi-dimensional formula enumeration (multiloop.c) --- */
 
