@@ -2,10 +2,13 @@
  * @file parse.c
  * @brief Parsers for chemical formula strings and element-range search limits.
  *
- * Supports both comma-separated notation (e.g., "C10,N6,O2,H13,Cl", "C8-10,H1-13,Cl")
- * and compact standard chemical notation (e.g., "C10H13N6O2Cl", "C2H5OH").
- * Repeated elements in a formula are accumulated, and unknown element symbols are
- * reported to stderr and ignored without aborting.
+ * Supports comma/whitespace-separated notation (e.g., "C10,N6,O2,H13,Cl", "C8-10,H1-13,Cl"),
+ * compact standard chemical notation (e.g., "C10H13N6O2Cl", "C2H5OH"), and nested
+ * parenthesized groups in formulas (e.g., "Ca(OH)2", "(CH3)2SO").
+ *
+ * All syntax errors, unknown element symbols, malformed ranges, and integer overflows
+ * are reported to `stderr` and cause the parser to return `-1` rather than silently
+ * producing incorrect compositions or bounds.
  */
 
 #include <stdio.h>
@@ -13,11 +16,15 @@
 #include <ctype.h>
 #include <string.h>
 #include <limits.h>
+#include <errno.h>
 
 #include "isotopes.h"
 
 #define DEBUG 0
 #define IFDEBUG if(DEBUG)
+
+/** @brief Maximum allowed nesting depth for parenthesized formula groups. */
+#define MAX_PAREN_DEPTH 32
 
 /**
  * @brief Test whether a character represents an ionic charge sign.
@@ -31,39 +38,237 @@ static int issign(char c)
 }
 
 /**
- * @brief Consume a non-negative decimal integer from the front of a string pointer.
+ * @brief Test whether a character is an allowed token separator.
  *
- * Advances `*pfc` past all consecutive ASCII digit characters. Excess digits beyond
- * the internal 31-character buffer are still consumed from `*pfc` to keep parsing
- * synchronized, and parsed values exceeding `INT_MAX` are clamped to `INT_MAX`.
- *
- * @param[in,out] pfc         Address of the current cursor in the input string;
- *                            must be non-NULL and `*pfc` must point to a NUL-terminated string.
- * @param[in]     default_val Value returned when `*pfc` does not start with a digit.
- * @return Parsed non-negative integer clamped to `INT_MAX`, or `default_val` if no digits were present.
+ * @param[in] c Character to inspect.
+ * @return Non-zero if `c` is a comma or ASCII space/tab; 0 otherwise.
  */
-static int parse_uint(const char **pfc, int default_val)
+static int isdelim(char c)
 {
-  char digit[32];
-  size_t dlen = 0;
+  return (c == ',' || c == ' ' || c == '\t');
+}
+
+/**
+ * @brief Parse a non-negative decimal integer with overflow checking.
+ *
+ * Advances `*pfc` past all consecutive ASCII digit characters. If `*pfc` does not
+ * start with a digit, sets `*out = default_val` and returns `0`. If the parsed
+ * value exceeds `INT_MAX`, returns `-1`.
+ *
+ * @param[in,out] pfc         Address of the current cursor in the input string.
+ * @param[in]     default_val Value stored in `*out` when no digits are present.
+ * @param[out]    out         Destination for the parsed integer.
+ * @return `0` on success; `-1` on integer overflow.
+ */
+static int parse_uint_checked(const char **pfc, int default_val, int *out)
+{
   const char *fc = *pfc;
+  long long acc = 0;
+  int has_digits = 0;
 
   while (*fc && isdigit((unsigned char)*fc)) {
-    if (dlen < sizeof(digit) - 1) {
-      digit[dlen++] = *fc;
+    has_digits = 1;
+    acc = acc * 10 + (*fc - '0');
+    if (acc > INT_MAX) {
+      /* Advance past remaining digits to keep cursor consistent */
+      while (*fc && isdigit((unsigned char)*fc)) fc++;
+      *pfc = fc;
+      return -1;
     }
     fc++;
   }
-  digit[dlen] = '\0';
+
+  *pfc = fc;
+  *out = has_digits ? (int)acc : default_val;
+  return 0;
+}
+
+/**
+ * @brief Parse an element symbol starting at `*pfc` and resolve its index in `Isotopes[]`.
+ *
+ * Consumes an initial alphabetic character (normalized to uppercase) followed by
+ * any immediately following lowercase alphabetic characters (so multi-letter invalid
+ * tokens like `"Foo"` are reported intact rather than split).
+ *
+ * @param[in,out] pfc       Address of the current cursor (must point at an alpha char).
+ * @param[out]    elem      Buffer receiving the normalized NUL-terminated symbol.
+ * @param[in]     elem_size Capacity of `elem` in bytes (must be >= 4).
+ * @return Element index in `[1, NI)` if found in `Isotopes[]`, or `-1` if unknown.
+ */
+static int parse_element(const char **pfc, char *elem, size_t elem_size)
+{
+  const char *fc = *pfc;
+  size_t len = 0;
+
+  if (*fc && isalpha((unsigned char)*fc)) {
+    if (len + 1 < elem_size) {
+      elem[len++] = (char)toupper((unsigned char)*fc);
+    }
+    fc++;
+    while (*fc && islower((unsigned char)*fc)) {
+      if (len + 1 < elem_size) {
+        elem[len++] = *fc;
+      }
+      fc++;
+    }
+  }
+  elem[len] = '\0';
   *pfc = fc;
 
-  if (dlen == 0) {
-    return default_val;
+  IFDEBUG printf("Element name is '%s'\n", elem);
+
+  for (int e = 1; e < NI; e++) {
+    if (strcmp(elem, Isotopes[e].name) == 0) {
+      IFDEBUG printf("Element ID is: %d\n", e);
+      return e;
+    }
+  }
+  return -1;
+}
+
+/**
+ * @brief Safely add a signed delta to an `int` accumulator with overflow detection.
+ *
+ * @param[in,out] target Accumulator to update.
+ * @param[in]     delta  Signed value to add.
+ * @return `0` on success; `-1` if `*target + delta` would overflow `int`.
+ */
+static int safe_add_int(int *target, long long delta)
+{
+  long long sum = (long long)(*target) + delta;
+  if (sum > INT_MAX || sum < INT_MIN) {
+    return -1;
+  }
+  *target = (int)sum;
+  return 0;
+}
+
+/**
+ * @brief Recursive helper for `Parse_Formula()` supporting nested parenthesized groups.
+ *
+ * @param[in,out] pfc        Address of the current cursor in the formula string.
+ * @param[in,out] acc        Composition vector accumulating counts for the current group.
+ * @param[in]     depth      Current parenthesis nesting depth (`0` at top level).
+ * @param[out]    parsed_any Set to `1` if at least one valid token was parsed in this group.
+ * @return `0` on success; `-1` on any syntax error, unknown element, or overflow.
+ */
+static int parse_formula_group(const char **pfc, formula_t acc, int depth, int *parsed_any)
+{
+  *parsed_any = 0;
+
+  if (depth > MAX_PAREN_DEPTH) {
+    fprintf(stderr, "Parentheses nested too deeply in formula (max %d)\n", MAX_PAREN_DEPTH);
+    return -1;
   }
 
-  long val = strtol(digit, NULL, 10);
-  if (val > INT_MAX) val = INT_MAX;
-  return (int)val;
+  while (**pfc) {
+    while (**pfc && isdelim(**pfc)) {
+      (*pfc)++;
+    }
+    if (!**pfc) {
+      if (depth > 0) {
+        fprintf(stderr, "Unclosed '(' in formula\n");
+        return -1;
+      }
+      break;
+    }
+
+    char c = **pfc;
+
+    if (c == ')') {
+      if (depth == 0) {
+        fprintf(stderr, "Unmatched ')' in formula\n");
+        return -1;
+      }
+      (*pfc)++;
+      return 0;
+    }
+
+    if (c == '(') {
+      (*pfc)++;
+      formula_t sub;
+      for (int e = 0; e <= NI; e++) sub[e] = 0;
+      int sub_any = 0;
+
+      if (parse_formula_group(pfc, sub, depth + 1, &sub_any) != 0) {
+        return -1;
+      }
+      if (!sub_any) {
+        fprintf(stderr, "Empty parentheses '()' in formula\n");
+        return -1;
+      }
+
+      int mult = 1;
+      if (parse_uint_checked(pfc, 1, &mult) != 0) {
+        fprintf(stderr, "Integer overflow in group multiplier in formula\n");
+        return -1;
+      }
+
+      for (int e = 0; e < NI; e++) {
+        if (sub[e] != 0) {
+          long long scaled = (long long)sub[e] * (long long)mult;
+          if (scaled > INT_MAX || scaled < INT_MIN || safe_add_int(&acc[e], scaled) != 0) {
+            fprintf(stderr, "Integer overflow for element '%s' in formula\n", Isotopes[e].name);
+            return -1;
+          }
+        }
+      }
+      *parsed_any = 1;
+      continue;
+    }
+
+    if (issign(c)) {
+      int sign = (c == '+') ? -1 : +1; /* '+' removes electrons, '-' adds electrons */
+      (*pfc)++;
+
+      int cnt = 1;
+      if (parse_uint_checked(pfc, 1, &cnt) != 0) {
+        fprintf(stderr, "Integer overflow in charge specification in formula\n");
+        return -1;
+      }
+
+      IFDEBUG printf("Molecule charge '%c' parsed (delta e = %lld)\n",
+                     c, (long long)sign * (long long)cnt);
+      if (safe_add_int(&acc[0], (long long)sign * (long long)cnt) != 0) {
+        fprintf(stderr, "Integer overflow in net charge in formula\n");
+        return -1;
+      }
+      *parsed_any = 1;
+      continue;
+    }
+
+    if (isalpha((unsigned char)c)) {
+      char elem[16];
+      int E = parse_element(pfc, elem, sizeof(elem));
+      if (E == -1) {
+        fprintf(stderr, "Unknown element: '%s'\n", elem);
+        return -1;
+      }
+
+      int cnt = 1;
+      if (parse_uint_checked(pfc, 1, &cnt) != 0) {
+        fprintf(stderr, "Integer overflow for element '%s' in formula\n", elem);
+        return -1;
+      }
+
+      IFDEBUG printf("Element count is %d\n", cnt);
+      if (safe_add_int(&acc[E], (long long)cnt) != 0) {
+        fprintf(stderr, "Integer overflow for element '%s' in formula\n", elem);
+        return -1;
+      }
+      *parsed_any = 1;
+      continue;
+    }
+
+    fprintf(stderr, "Unexpected character '%c' in formula\n", c);
+    return -1;
+  }
+
+  if (depth > 0) {
+    fprintf(stderr, "Unclosed '(' in formula\n");
+    return -1;
+  }
+  return 0;
 }
 
 /**
@@ -71,87 +276,38 @@ static int parse_uint(const char **pfc, int default_val)
  *
  * Zero-initializes all `NI + 1` entries of `fi` before parsing. Recognizes:
  * - 1- or 2-letter element symbols in `Isotopes[]` (e.g., `C`, `H`, `Cl`, `Na`),
- *   separated by delimiters (such as commas/spaces) or uppercase boundaries.
- * - Optional integer counts (omitted count defaults to 1).
- * - Repeated occurrences of the same element, whose counts are summed (e.g., `C2H5OH` -> `C2,H6,O`).
- * - Charge suffixes `'+'` and `'-'` with optional multiplicity (e.g., `+`, `+2`, `-`),
+ *   separated by commas/spaces or uppercase boundaries.
+ * - Optional non-negative integer counts (omitted count defaults to 1).
+ * - Nested parenthesized groups with optional multipliers (e.g., `Ca(OH)2`, `(CH3)2SO`).
+ * - Repeated occurrences of the same element, whose counts are summed (`C2H5OH` -> `C2,H6,O`).
+ * - Charge suffixes `'+'` and `'-'` with optional multiplicity (e.g., `+`, `+2`, `++`, `-`),
  *   mapped to electron count `fi[0]` (`+` subtracts electrons, `-` adds electrons).
- *
- * Unknown element symbols are logged to `stderr` and skipped.
  *
  * @param[in]  fc NUL-terminated formula string to parse; must be non-NULL.
  * @param[out] fi Destination composition vector; overwritten completely on entry.
+ * @return `0` on success; `-1` on empty input, unknown element, syntax error, or overflow.
  */
-void Parse_Formula(const char *fc, formula_t fi)
+int Parse_Formula(const char *fc, formula_t fi)
 {
-  char elem[3];
-  int i, e, id, E;
-  int parse_sign;
+  for (int e = 0; e <= NI; e++) fi[e] = 0;
 
-  for (e = 0; e <= NI; e++) fi[e] = 0;
+  if (fc == NULL) {
+    fprintf(stderr, "Empty chemical formula\n");
+    return -1;
+  }
 
   IFDEBUG printf("\nParsing formula string: '%s'\n\n", fc);
-  while (*fc) {
-    /* Skip delimiter characters */
-    while (*fc && !isalpha((unsigned char)*fc) &&
-           !isdigit((unsigned char)*fc) && !issign(*fc)) {
-      fc++;
-    }
-    if (!*fc) break;
 
-    /* Get element name (or charge sign) */
-    i = 0;
-    parse_sign = 0;
-    while (*fc) {
-      unsigned char uc = (unsigned char)*fc;
-      if (!isalpha(uc) && !issign(*fc)) break;
-      if (issign(*fc)) {
-        if (i > 0) break; /* Finish preceding element before parsing charge */
-        fc++;
-        elem[0] = 'e';
-        i = 1;
-        if (uc == '+') parse_sign = -1; /* Electrons are SUBTRACTED */
-        if (uc == '-') parse_sign = +1; /* Electrons are ADDED      */
-        IFDEBUG printf("Molecule charge '%c' parsed (sign %d)\n", (char)uc, parse_sign);
-        break;
-      }
-      /* Start a new element on an uppercase letter after at least one letter */
-      if (i > 0 && isupper(uc)) break;
-      if (i >= 2) break;
-
-      fc++;
-      if (i == 0) {
-        elem[i++] = (char)toupper(uc);
-      } else {
-        elem[i++] = (char)tolower(uc);
-      }
-    }
-    elem[i] = '\0';
-
-    IFDEBUG printf("Element name is '%s'\n", elem);
-
-    E = -1;
-    for (e = 0; e < NI; e++) {
-      if (strcmp(elem, Isotopes[e].name) == 0) {
-        E = e;
-        break;
-      }
-    }
-
-    if (E == -1) {
-      fprintf(stderr, "Unknown element: '%s'\n", elem);
-    } else {
-      IFDEBUG printf("Element ID is: %d\n", E);
-    }
-
-    /* Get element count */
-    id = parse_uint(&fc, 1);
-    if (parse_sign) id *= parse_sign;
-
-    IFDEBUG printf("Element count is %d\n", id);
-
-    if (E != -1) fi[E] += id;
+  const char *cursor = fc;
+  int parsed_any = 0;
+  if (parse_formula_group(&cursor, fi, 0, &parsed_any) != 0) {
+    return -1;
   }
+  if (!parsed_any) {
+    fprintf(stderr, "Empty chemical formula\n");
+    return -1;
+  }
+  return 0;
 }
 
 /**
@@ -165,86 +321,93 @@ void Parse_Formula(const char *fc, formula_t fi)
  *                                (e.g., `C10-8`), they are automatically swapped so
  *                                `lim[E].min <= lim[E].max` always holds.
  *
- * Unknown element symbols are logged to `stderr` and skipped. Repeated entries for
- * the same element overwrite the earlier range for that element.
+ * Missing bounds (e.g., `C-10`, `C8-`), extra hyphens (`C8-10-12`), unexpected
+ * characters, unknown element symbols, and integer overflows are reported to
+ * `stderr` and cause an error return. Repeated entries for the same element
+ * overwrite the earlier range for that element.
  *
- * @param[in]  fc  NUL-terminated limits string (e.g., `"C8-10,N6,O1-2,H1-13,Cl"`);
- *                 must be non-NULL.
+ * @param[in]  fc  NUL-terminated limits string (e.g., `"C8-10,N6,O1-2,H1-13,Cl"`).
  * @param[out] lim Destination bounds array; overwritten completely on entry.
+ * @return `0` on success; `-1` on empty input, unknown element, malformed range, or overflow.
  */
-void Parse_Limits(const char *fc, limits_t lim)
+int Parse_Limits(const char *fc, limits_t lim)
 {
-  char elem[3];
-  int i, e, id, E, tmpi;
-
-  for (e = 0; e <= NI; e++) {
+  for (int e = 0; e <= NI; e++) {
     lim[e].min = 0;
     lim[e].max = 0;
   }
 
+  if (fc == NULL) {
+    fprintf(stderr, "Empty element limits\n");
+    return -1;
+  }
+
   IFDEBUG printf("\nParsing limits string: '%s'\n\n", fc);
+
+  int parsed_any = 0;
   while (*fc) {
-    /* Skip delimiter characters */
-    while (*fc && !isalpha((unsigned char)*fc) && !isdigit((unsigned char)*fc)) {
+    while (*fc && isdelim(*fc)) {
       fc++;
     }
     if (!*fc) break;
 
-    /* Get element name */
-    i = 0;
-    while (*fc) {
-      unsigned char uc = (unsigned char)*fc;
-      if (!isalpha(uc)) break;
-      if (i > 0 && isupper(uc)) break;
-      if (i >= 2) break;
-
-      fc++;
-      if (i == 0) {
-        elem[i++] = (char)toupper(uc);
-      } else {
-        elem[i++] = (char)tolower(uc);
-      }
-    }
-    elem[i] = '\0';
-
-    IFDEBUG printf("Element name is '%s'\n", elem);
-
-    E = -1;
-    for (e = 0; e < NI; e++) {
-      if (strcmp(elem, Isotopes[e].name) == 0) {
-        E = e;
-        break;
-      }
+    if (!isalpha((unsigned char)*fc)) {
+      fprintf(stderr, "Unexpected character '%c' in limits\n", *fc);
+      return -1;
     }
 
+    char elem[16];
+    int E = parse_element(&fc, elem, sizeof(elem));
     if (E == -1) {
       fprintf(stderr, "Unknown element: '%s'\n", elem);
-    } else {
-      IFDEBUG printf("Element ID is: %d\n", E);
+      return -1;
     }
-
-    /* Get lower limit of element count */
-    id = parse_uint(&fc, 1);
-    IFDEBUG printf("Element lower limit is %d\n", id);
-
-    if (E != -1) lim[E].min = id;
 
     if (*fc == '-') {
-      fc++;
-      id = parse_uint(&fc, 1);
+      fprintf(stderr, "Missing lower limit before '-' for element '%s'\n", elem);
+      return -1;
     }
-    IFDEBUG printf("Element upper limit is %d\n", id);
 
-    if (E != -1) {
-      lim[E].max = id;
-      if (lim[E].max < lim[E].min) {
-        tmpi = lim[E].max;
-        lim[E].max = lim[E].min;
-        lim[E].min = tmpi;
-        IFDEBUG printf("Upper and lower limits swapped\n");
+    int low = 1;
+    if (parse_uint_checked(&fc, 1, &low) != 0) {
+      fprintf(stderr, "Integer overflow in lower limit for element '%s'\n", elem);
+      return -1;
+    }
+    IFDEBUG printf("Element lower limit is %d\n", low);
+
+    int high = low;
+    if (*fc == '-') {
+      fc++;
+      if (!isdigit((unsigned char)*fc)) {
+        fprintf(stderr, "Missing upper limit after '-' for element '%s'\n", elem);
+        return -1;
+      }
+      if (parse_uint_checked(&fc, 0, &high) != 0) {
+        fprintf(stderr, "Integer overflow in upper limit for element '%s'\n", elem);
+        return -1;
+      }
+      if (*fc == '-') {
+        fprintf(stderr, "Unexpected '-' in limits for element '%s'\n", elem);
+        return -1;
       }
     }
+    IFDEBUG printf("Element upper limit is %d\n", high);
+
+    if (high < low) {
+      int tmp = high;
+      high = low;
+      low = tmp;
+      IFDEBUG printf("Upper and lower limits swapped\n");
+    }
+
+    lim[E].min = low;
+    lim[E].max = high;
+    parsed_any = 1;
   }
+
+  if (!parsed_any) {
+    fprintf(stderr, "Empty element limits\n");
+    return -1;
+  }
+  return 0;
 }
-
-

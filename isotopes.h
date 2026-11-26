@@ -128,11 +128,17 @@ int    Mass_Diff(const void *fm1, const void *fm2);
 
 /* --- Formula and search-limit parsing (parse.c) --- */
 
-/** @brief Parse a chemical formula string into composition vector `fi`. */
-void Parse_Formula(const char *fc, formula_t fi);
+/**
+ * @brief Parse a chemical formula string into composition vector `fi`.
+ * @return `0` on success, `-1` on syntax error, unknown element, or integer overflow.
+ */
+int Parse_Formula(const char *fc, formula_t fi);
 
-/** @brief Parse an element-range limits string into bounds array `lim`. */
-void Parse_Limits(const char *fc, limits_t lim);
+/**
+ * @brief Parse an element-range limits string into bounds array `lim`.
+ * @return `0` on success, `-1` on syntax error, unknown element, or integer overflow.
+ */
+int Parse_Limits(const char *fc, limits_t lim);
 
 /* --- Multi-dimensional formula enumeration (multiloop.c) --- */
 

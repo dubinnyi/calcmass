@@ -17,23 +17,25 @@
 #define False 0
 #define True  1
 
+/* Monoisotopic neutral atomic masses from AME2020 (Wang et al., Chin. Phys. C 45, 030003, 2021)
+ * and electron relative atomic mass from CODATA 2022 (in unified atomic mass units / Da). */
 isotope_t Isotopes[NI] =
 {
-  { "e",  0,  0.000549, 0, False },  /*  0  ELECTRON    */
-  { "C", 12, 12.000000, 4, True  },  /*  1  CARBON      */
-  { "H",  1,  1.007825, 1, True  },  /*  2  PROTON      */
-  { "N", 14, 14.003074, 3, True  },  /*  3  NITROGEN    */
-  { "O", 16, 15.994915, 2, True  },  /*  4  OXYGEN      */
-  { "P", 31, 30.973763, 5, False },  /*  5  PHOSPHORUS  */
-  { "S", 32, 31.972072, 6, True  },  /*  6  SULFUR      */
-  {"Na", 23, 22.989770, 1, True  },  /*  7  SODIUM      */
-  {"Ca", 40, 39.962591, 2, True  },  /*  8  CALCIUM     */
-  { "K", 39, 38.963708, 1, True  },  /*  9  POTASSIUM   */
+  { "e",  0,  0.000548579909, 0, False },  /*  0  ELECTRON    */
+  { "C", 12, 12.000000000000, 4, True  },  /*  1  CARBON      */
+  { "H",  1,  1.007825031898, 1, True  },  /*  2  PROTON      */
+  { "N", 14, 14.00307400425,  3, True  },  /*  3  NITROGEN    */
+  { "O", 16, 15.99491461926,  2, True  },  /*  4  OXYGEN      */
+  { "P", 31, 30.97376199768,  5, False },  /*  5  PHOSPHORUS  */
+  { "S", 32, 31.9720711744,   6, True  },  /*  6  SULFUR      */
+  {"Na", 23, 22.98976928195,  1, True  },  /*  7  SODIUM      */
+  {"Ca", 40, 39.962590863,    2, True  },  /*  8  CALCIUM     */
+  { "K", 39, 38.963706486,    1, True  },  /*  9  POTASSIUM   */
 
-  { "B", 11, 11.009305, 3, True  },  /* 10  BORON       */
-  { "F", 19, 18.998403, 1, True  },  /* 11  FLUORINE    */
-  {"Cl", 35, 34.968853, 1, True  },  /* 12  CHLORINE    */
-  {"Br", 79, 78.918336, 1, True  },  /* 13  BROMINE     */
+  { "B", 11, 11.009305166,    3, True  },  /* 10  BORON       */
+  { "F", 19, 18.99840316207,  1, True  },  /* 11  FLUORINE    */
+  {"Cl", 35, 34.968852694,    1, True  },  /* 12  CHLORINE    */
+  {"Br", 79, 78.918337574,    1, True  },  /* 13  BROMINE     */
 };
 
 int Mass_Init_Flag = 0;

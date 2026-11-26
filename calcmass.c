@@ -55,7 +55,7 @@ static void print_usage(int argc)
     "  -s, --s          Short output (M/Z line only for -mass; table only for -chem)\n\n"
     "[type] is one of M, M+, M-, MH+, MNa+, MK+, MCa+, MH-,\n"
     "                 M2H++ (MH++, MH2+, MH+2), MHNa++, M2Na++\n"
-    "[Chemical formula] is in the form C10,N6,O2,H13,Cl or C10H13N6O2Cl\n"
+    "[Chemical formula] is in the form C10,N6,O2,H13,Cl, C10H13N6O2Cl, or Ca(OH)2\n"
     "[Chemical limits]  is in the form C8-10,N6,O1-2,H1-13,Cl\n", argc);
 }
 
@@ -71,7 +71,7 @@ static void print_usage(int argc)
  *
  * @param[in] argc Number of command-line arguments (at least 3 positional args for `-mass`, 4 for `-chem`).
  * @param[in] argv Array of NUL-terminated command-line argument strings.
- * @return `0` on success; `1` on invalid arguments, unknown mode/adduct, or invalid target mass.
+ * @return `0` on success; `1` on invalid arguments, unknown mode/adduct, parse error, or invalid target mass.
  */
 int main(int argc, char **argv)
 {
@@ -82,26 +82,36 @@ int main(int argc, char **argv)
   mass_t MT;
   int rdb_flag = 0;
   int short_flag = 0;
-  char *pos[8];
   int npos = 0;
+  int rc = 0;
 
   mass_type_init();
+
+  char **pos = NULL;
+  if (argc > 1) {
+    pos = (char **)malloc((size_t)(argc - 1) * sizeof(*pos));
+    if (pos == NULL) {
+      fprintf(stderr, "Memory allocation failed\n");
+      return 1;
+    }
+  }
 
   for (int a = 1; a < argc; a++) {
     if (strcmp(argv[a], "-s") == 0 || strcmp(argv[a], "--s") == 0) {
       short_flag = 1;
-    } else if (npos < 8) {
+    } else {
       pos[npos++] = argv[a];
     }
   }
 
   if (!short_flag) {
     printf("\ncalcmass by Maxim A. Dubinnyi\n");
-    printf("Version 2026-11-24\n");
+    printf("Version 2026-11-26\n");
   }
 
   if (npos < 3) {
     print_usage(argc);
+    free(pos);
     return 1;
   }
 
@@ -121,6 +131,7 @@ int main(int argc, char **argv)
   else if (strcmp(pos[1], "M2Na++") == 0) MT = MASS_POS_2Na;
   else {
     fprintf(stderr, "Unknown mass type: '%s'. Exiting.\n", pos[1]);
+    free(pos);
     return 1;
   }
 
@@ -130,7 +141,15 @@ int main(int argc, char **argv)
   }
 
   if (strcmp(pos[0], "-mass") == 0 || strcmp(pos[0], "--mass") == 0) {
-    Parse_Formula(pos[2], fi);
+    if (npos > 3) {
+      fprintf(stderr, "Too many arguments for -mass mode (unexpected: '%s')\n", pos[3]);
+      free(pos);
+      return 1;
+    }
+    if (Parse_Formula(pos[2], fi) != 0) {
+      free(pos);
+      return 1;
+    }
     if (short_flag) {
       double charge = Calc_Charge(fi, MT);
       if (charge == 0.0) {
@@ -138,6 +157,7 @@ int main(int argc, char **argv)
       } else {
         printf("%s: (M/Z) %11.6f\n", Mass[MT].name, Calc_Mass_Charge_Ratio(fi, MT));
       }
+      free(pos);
       return 0;
     }
     Print_Formula(fi, fs, sizeof(fs));
@@ -145,9 +165,15 @@ int main(int argc, char **argv)
     Calc_RDB(fi, &rdb);
     printf("\nParsed formula: '%s', RDB = %4.1f\n", fs, rdb);
     (void)Print_Formula_Mass(fi, MT);
+    free(pos);
     return 0;
   } else if (strcmp(pos[0], "-chem") == 0 || strcmp(pos[0], "--chem") == 0 ||
              strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
+    if (npos > 4) {
+      fprintf(stderr, "Too many arguments for %s mode (unexpected: '%s')\n", pos[0], pos[4]);
+      free(pos);
+      return 1;
+    }
     if (strcmp(pos[0], "-chem-rdb") == 0 || strcmp(pos[0], "--chem-rdb") == 0) {
       /* skip negative and half-integer RDB values */
       rdb_flag = 1;
@@ -155,7 +181,10 @@ int main(int argc, char **argv)
       rdb_flag = 0;
     }
 
-    Parse_Limits(pos[2], lim);
+    if (Parse_Limits(pos[2], lim) != 0) {
+      free(pos);
+      return 1;
+    }
     if (!short_flag) {
       Print_Limits(lim, fs, sizeof(fs));
       printf("\nParsed limits: '%s'\n", fs);
@@ -163,6 +192,7 @@ int main(int argc, char **argv)
 
     if (npos < 4) {
       fprintf(stderr, "Please enter the target mass\n");
+      free(pos);
       return 1;
     }
 
@@ -172,6 +202,7 @@ int main(int argc, char **argv)
     if (errno != 0 || endptr == pos[3] || *endptr != '\0' ||
         !isfinite(Target_Mass) || Target_Mass <= 0.0) {
       fprintf(stderr, "Invalid target mass: '%s'\n", pos[3]);
+      free(pos);
       return 1;
     }
     if (!short_flag) {
@@ -213,6 +244,7 @@ int main(int argc, char **argv)
     int n_act = n_chem < N_Best ? n_chem : N_Best;
     if (n_act == 0) {
       printf("No matching chemical formulas found.\n");
+      free(pos);
       return 0;
     }
 
@@ -247,11 +279,14 @@ int main(int argc, char **argv)
     if (!short_flag && !rdb_flag) {
       printf("use --chem-rdb instead of --chem\nto ignore formulas with NEGATIVE or HALF-INTEGER RDB values\n");
     }
-    return 0;
+    rc = 0;
   } else {
     fprintf(stderr, "Unknown argument: %s\n", pos[0]);
-    return 1;
+    rc = 1;
   }
+
+  free(pos);
+  return rc;
 }
 
 /**
